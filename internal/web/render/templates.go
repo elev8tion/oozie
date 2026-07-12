@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"os"
 	"path/filepath"
 )
 
@@ -23,8 +24,9 @@ func New(root string) (*Renderer, error) {
 	}
 
 	tmpl := template.New("app").Funcs(template.FuncMap{
-		"dict":    dict,
-		"include": renderer.include,
+		"dict":       dict,
+		"include":    renderer.include,
+		"cssVersion": cssVersion,
 	})
 	for _, pattern := range patterns {
 		matches, err := filepath.Glob(pattern)
@@ -62,6 +64,16 @@ func (r *Renderer) include(name string, data any) (template.HTML, error) {
 		return "", err
 	}
 	return template.HTML(buf.String()), nil
+}
+
+// cssVersion returns the stylesheet's mtime so the <link> URL changes
+// whenever the file does, defeating stale browser caches.
+func cssVersion() string {
+	info, err := os.Stat(filepath.Join("static", "css", "app.css"))
+	if err != nil {
+		return "0"
+	}
+	return fmt.Sprintf("%d", info.ModTime().Unix())
 }
 
 func dict(values ...any) map[string]any {

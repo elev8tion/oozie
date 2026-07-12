@@ -16,7 +16,11 @@ func (a *App) Routes() http.Handler {
 	service.SetAgent(pi.NewManager(catalog, service), catalog)
 	h := projects.NewHandlers(service, a.renderer)
 
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	static := http.StripPrefix("/static/", http.FileServer(http.Dir("static")))
+	mux.Handle("GET /static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		static.ServeHTTP(w, r)
+	}))
 	mux.HandleFunc("GET /", h.Home)
 	mux.HandleFunc("GET /onboarding", h.Onboarding)
 

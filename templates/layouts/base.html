@@ -1,0 +1,35 @@
+{{define "layouts/base"}}
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js"></script>
+</head>
+<body>
+  <div class="app-frame">
+    <aside class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="/projects"><span class="dot"></span><strong>oozie</strong><small>solo workspace</small></a>
+      <nav class="nav-list">
+        <a href="/projects">My Projects</a>
+        <a href="/store">Store</a>
+        <a href="/installed-apps">Installed Apps</a>
+        <a href="/publishing/jobs">Publishing Jobs</a>
+        <a href="/settings">Settings</a>
+      </nav>
+      <div class="sidebar-card">
+        <span class="label">Local mode</span>
+        <p>No sign-in. Stubbed AI, publishing, and installs for solo building.</p>
+      </div>
+    </aside>
+    <main class="main-panel" id="main-panel">
+      {{include .Content .}}
+    </main>
+  </div>
+  <div id="toast-region" class="toast-region" aria-live="polite">{{if .Flash}}<div class="toast">{{.Flash}}</div>{{end}}</div>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
+{{end}}

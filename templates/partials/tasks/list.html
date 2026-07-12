@@ -1,0 +1,9 @@
+{{define "partials/tasks/list"}}
+<ul id="task-list" class="task-list">
+  {{range index .Data "Tasks"}}
+    {{template "partials/tasks/row" dict "Data" (dict "Task" .)}}
+  {{else}}
+    <li class="empty-state">No tasks yet.</li>
+  {{end}}
+</ul>
+{{end}}

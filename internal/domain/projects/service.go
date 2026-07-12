@@ -1,0 +1,337 @@
+package projects
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"oozie/internal/agent/pi"
+)
+
+type Service struct {
+	repo    *Repo
+	agent   *pi.Manager
+	catalog pi.Catalog
+}
+
+func NewService(repo *Repo) *Service { return &Service{repo: repo} }
+
+// SetAgent wires the pi RPC manager after construction (the manager's
+// event sink is this service, so the two reference each other).
+func (s *Service) SetAgent(agent *pi.Manager, catalog pi.Catalog) {
+	s.agent = agent
+	s.catalog = catalog
+}
+
+func (s *Service) Dashboard(ctx context.Context) (Dashboard, error) {
+	ps, err := s.repo.ListProjects(ctx, "", "active")
+	if err != nil {
+		return Dashboard{}, err
+	}
+	apps, _ := s.repo.ListStoreApps(ctx, "", "featured")
+	jobs, _ := s.repo.ListJobs(ctx, "")
+	return Dashboard{Projects: ps, StoreApps: apps, Jobs: jobs}, nil
+}
+func (s *Service) ListProjects(ctx context.Context, q, filter string) ([]Project, error) {
+	return s.repo.ListProjects(ctx, strings.TrimSpace(q), filter)
+}
+func (s *Service) GetProject(ctx context.Context, id int64) (Project, error) {
+	return s.repo.GetProject(ctx, id)
+}
+func (s *Service) CreateProject(ctx context.Context, name, path string, trusted bool) (Project, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Project{}, ErrValidation{"Project name is required."}
+	}
+	if path == "" {
+		path = "~/Projects/" + strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+	}
+	return s.repo.CreateProject(ctx, name, path, trusted)
+}
+func (s *Service) ArchiveProject(ctx context.Context, id int64) error {
+	return s.repo.ArchiveProject(ctx, id)
+}
+func (s *Service) AgentPage(ctx context.Context, projectID int64) (AgentPage, error) {
+	p, err := s.repo.GetProject(ctx, projectID)
+	if err != nil {
+		return AgentPage{}, err
+	}
+	session, err := s.repo.GetSession(ctx, projectID)
+	if err != nil {
+		return AgentPage{}, err
+	}
+	msgs, _ := s.repo.ListMessages(ctx, session.ID)
+	reqs, _ := s.repo.ListRequests(ctx, session.ID)
+	q, _ := s.repo.PendingQuestion(ctx, projectID)
+	perm, _ := s.repo.PendingPermission(ctx, projectID)
+	atts, _ := s.repo.ListAttachments(ctx, projectID)
+	model := session.Model
+	if model == "" {
+		model = s.catalog.DefaultModel
+	}
+	streaming := len(reqs) > 0 && (reqs[0].Status == "streaming" || reqs[0].Status == "waiting")
+	return AgentPage{Project: p, Session: session, Requests: reqs, Messages: msgs, Question: q, Permission: perm, Attachments: atts, Mode: "build", Models: s.models(), Model: model, Streaming: streaming}, nil
+}
+
+func (s *Service) models() []ModelOption {
+	out := make([]ModelOption, 0, len(s.catalog.Models))
+	for _, m := range s.catalog.Models {
+		out = append(out, ModelOption{Provider: m.Provider, ID: m.ID, Full: m.Full})
+	}
+	return out
+}
+
+func (s *Service) SendAgentMessage(ctx context.Context, projectID int64, mode, message string) error {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ErrValidation{"Message is required."}
+	}
+	if s.agent == nil {
+		return ErrValidation{"The pi agent is not configured."}
+	}
+	project, err := s.repo.GetProject(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	session, err := s.repo.GetSession(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if mode != "plan" {
+		mode = "build"
+	}
+	model := session.Model
+	if model == "" {
+		model = s.catalog.DefaultModel
+	}
+	if session.PiSessionID == "" {
+		session.PiSessionID = newPiSessionID(projectID)
+		if err := s.repo.SetPiSessionID(ctx, session.ID, session.PiSessionID); err != nil {
+			return err
+		}
+	}
+	workdir, err := projectWorkdir(project)
+	if err != nil {
+		return ErrValidation{"Project directory unavailable: " + err.Error()}
+	}
+	requestID, err := s.repo.CreateAgentRequest(ctx, session.ID, mode, message)
+	if err != nil {
+		return err
+	}
+	opts := pi.StartOptions{
+		ProjectID:    projectID,
+		Workdir:      workdir,
+		Model:        model,
+		PiSessionID:  session.PiSessionID,
+		SystemPrompt: oozieSystemPrompt(project, workdir),
+		Trusted:      project.Trusted,
+	}
+	if err := s.agent.Prompt(opts, requestID, wrapModeMessage(mode, message)); err != nil {
+		_ = s.repo.InsertMessage(ctx, requestID, "system", "error", "Failed to start pi: "+err.Error())
+		_ = s.repo.CompleteRequest(ctx, requestID, "failed")
+		return ErrValidation{"Could not reach the pi agent: " + err.Error()}
+	}
+	return nil
+}
+
+func (s *Service) SelectModel(ctx context.Context, projectID int64, model string) error {
+	found := false
+	for _, m := range s.catalog.Models {
+		if m.Full == model {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrValidation{"Unknown model: " + model}
+	}
+	session, err := s.repo.GetSession(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.SetSessionModel(ctx, session.ID, model); err != nil {
+		return err
+	}
+	if s.agent != nil {
+		if err := s.agent.SetModel(projectID, model); err != nil {
+			return ErrValidation{"Saved, but the running agent rejected the model: " + err.Error()}
+		}
+	}
+	return nil
+}
+
+func (s *Service) CancelRequest(ctx context.Context, projectID, id int64) error {
+	if s.agent != nil {
+		_ = s.agent.Abort(projectID)
+	}
+	return s.repo.CancelRequest(ctx, id)
+}
+func (s *Service) AnswerQuestion(ctx context.Context, id int64, answer string) error {
+	q, err := s.repo.GetQuestion(ctx, id)
+	if err != nil {
+		return err
+	}
+	if q.RPCID != "" && s.agent != nil {
+		if err := s.agent.RespondValue(q.ProjectID, q.RPCID, answer); err != nil {
+			return ErrValidation{err.Error()}
+		}
+	}
+	return s.repo.ResolveQuestion(ctx, id, "answered")
+}
+func (s *Service) DismissQuestion(ctx context.Context, id int64) error {
+	q, err := s.repo.GetQuestion(ctx, id)
+	if err != nil {
+		return err
+	}
+	if q.RPCID != "" && s.agent != nil {
+		_ = s.agent.RespondCancel(q.ProjectID, q.RPCID)
+	}
+	return s.repo.ResolveQuestion(ctx, id, "dismissed")
+}
+func (s *Service) ResolvePermission(ctx context.Context, id int64, approved bool) error {
+	p, err := s.repo.GetPermission(ctx, id)
+	if err != nil {
+		return err
+	}
+	if p.RPCID != "" && s.agent != nil {
+		if err := s.agent.RespondConfirm(p.ProjectID, p.RPCID, approved); err != nil {
+			return ErrValidation{err.Error()}
+		}
+	}
+	if approved {
+		return s.repo.ResolvePermission(ctx, id, "approved")
+	}
+	return s.repo.ResolvePermission(ctx, id, "denied")
+}
+
+// --- pi.Sink implementation: events from the agent process land here. ---
+
+func (s *Service) AssistantMessage(projectID, requestID int64, content string) {
+	if err := s.repo.InsertMessage(context.Background(), requestID, "assistant", "completed", content); err != nil {
+		log.Printf("persist assistant message (project %d): %v", projectID, err)
+	}
+}
+func (s *Service) ToolMessage(projectID, requestID int64, content string) {
+	if err := s.repo.InsertMessage(context.Background(), requestID, "tool", "completed", content); err != nil {
+		log.Printf("persist tool message (project %d): %v", projectID, err)
+	}
+}
+func (s *Service) RequestSettled(projectID, requestID int64, status string) {
+	if err := s.repo.CompleteRequest(context.Background(), requestID, status); err != nil {
+		log.Printf("settle request %d (project %d): %v", requestID, projectID, err)
+	}
+}
+func (s *Service) Question(projectID, requestID int64, rpcID, prompt, optionsJSON string) {
+	if err := s.repo.InsertQuestion(context.Background(), projectID, requestID, rpcID, prompt, optionsJSON); err != nil {
+		log.Printf("persist question (project %d): %v", projectID, err)
+	}
+}
+func (s *Service) Permission(projectID, requestID int64, rpcID, name, reason string) {
+	if err := s.repo.InsertPermission(context.Background(), projectID, requestID, rpcID, name, reason); err != nil {
+		log.Printf("persist permission (project %d): %v", projectID, err)
+	}
+}
+func (s *Service) AgentError(projectID, requestID int64, message string) {
+	if err := s.repo.InsertMessage(context.Background(), requestID, "system", "error", message); err != nil {
+		log.Printf("persist agent error (project %d): %v", projectID, err)
+	}
+}
+
+func projectWorkdir(p Project) (string, error) {
+	path := strings.TrimSpace(p.ProjectPathDisplay)
+	if path == "" {
+		path = "~/Projects/" + strings.ToLower(strings.ReplaceAll(p.Name, " ", "-"))
+	}
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func newPiSessionID(projectID int64) string {
+	buf := make([]byte, 8)
+	_, _ = rand.Read(buf)
+	return fmt.Sprintf("oozie-p%d-%s", projectID, hex.EncodeToString(buf))
+}
+
+func oozieSystemPrompt(p Project, workdir string) string {
+	return fmt.Sprintf(`You are running inside oozie, a local project workspace UI, as the agent for the project %q (working directory: %s).
+
+How to behave in oozie:
+- Requests arrive in one of two modes, stated at the top of each message.
+- PLAN mode: produce a concise, numbered implementation plan. Do not create, modify, or delete any files. End by asking whether to proceed.
+- BUILD mode: implement the request directly in the working directory, verifying your work as you go (build/tests where applicable).
+- Your responses are rendered in a compact web timeline; keep them focused and skip decorative preamble.
+- The user approves questions and permission dialogs through the oozie side panel; when you ask via a dialog, wait for that response.`, p.Name, workdir)
+}
+
+func wrapModeMessage(mode, message string) string {
+	if mode == "plan" {
+		return "[oozie mode: PLAN — plan only, do not modify files]\n\n" + message
+	}
+	return "[oozie mode: BUILD — implement directly]\n\n" + message
+}
+func (s *Service) SaveFeedback(ctx context.Context, projectID int64, typ, reason, extra string) error {
+	if strings.TrimSpace(typ) == "" {
+		return ErrValidation{"Feedback type is required."}
+	}
+	return s.repo.SaveFeedback(ctx, projectID, typ, reason, extra)
+}
+func (s *Service) GetDraft(ctx context.Context, projectID int64) (PublishDraft, error) {
+	d, err := s.repo.GetDraft(ctx, projectID)
+	if err != nil {
+		p, _ := s.repo.GetProject(ctx, projectID)
+		return PublishDraft{ProjectID: projectID, AppName: p.Name, Headline: "A focused project workspace", PublishTarget: "public", Visibility: "unlisted", ScreenshotManifest: "[]"}, nil
+	}
+	return d, err
+}
+func (s *Service) SaveDraft(ctx context.Context, d PublishDraft) error {
+	if strings.TrimSpace(d.AppName) == "" || strings.TrimSpace(d.Headline) == "" || strings.TrimSpace(d.Description) == "" {
+		return ErrValidation{"App name, headline, and description are required."}
+	}
+	if d.PublishTarget == "" {
+		d.PublishTarget = "public"
+	}
+	if d.Visibility == "" {
+		d.Visibility = "unlisted"
+	}
+	return s.repo.SaveDraft(ctx, d)
+}
+func (s *Service) Publish(ctx context.Context, projectID int64) error {
+	return s.repo.Publish(ctx, projectID)
+}
+func (s *Service) ListJobs(ctx context.Context, status string) ([]PublishingJob, error) {
+	return s.repo.ListJobs(ctx, status)
+}
+func (s *Service) ListStoreApps(ctx context.Context, q, filter string) ([]StoreApp, error) {
+	return s.repo.ListStoreApps(ctx, strings.TrimSpace(q), filter)
+}
+func (s *Service) GetStoreApp(ctx context.Context, id int64) (StoreApp, error) {
+	return s.repo.GetStoreApp(ctx, id)
+}
+func (s *Service) InstallApp(ctx context.Context, id int64) error { return s.repo.InstallApp(ctx, id) }
+func (s *Service) InstalledApps(ctx context.Context) ([]StoreApp, error) {
+	return s.repo.InstalledApps(ctx)
+}
+func (s *Service) GetSettings(ctx context.Context) (Settings, error) { return s.repo.GetSettings(ctx) }
+func (s *Service) SaveSettings(ctx context.Context, settings Settings) error {
+	if settings.Appearance == "" {
+		settings.Appearance = "system"
+	}
+	if settings.StyleProfile == "" {
+		settings.StyleProfile = "graphite"
+	}
+	return s.repo.SaveSettings(ctx, settings)
+}

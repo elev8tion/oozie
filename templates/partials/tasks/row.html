@@ -1,0 +1,12 @@
+{{define "partials/tasks/row"}}
+{{$task := index .Data "Task"}}
+<li id="task-{{$task.ID}}" class="task-row {{if $task.Completed}}is-complete{{end}}">
+  <span>{{$task.Title}}</span>
+  <div class="row-actions">
+    {{if not $task.Completed}}
+    <button class="button small" hx-post="/tasks/{{$task.ID}}/complete" hx-target="closest li" hx-swap="outerHTML">Complete</button>
+    {{end}}
+    <button class="button danger small" hx-post="/tasks/{{$task.ID}}/delete" hx-target="#task-list" hx-swap="outerHTML" hx-confirm="Delete this task?">Delete</button>
+  </div>
+</li>
+{{end}}

@@ -1,0 +1,13 @@
+{{define "pages/tasks/index-content"}}
+<section class="panel">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">Starter feature</p>
+      <h1>Tasks</h1>
+    </div>
+  </div>
+
+  {{template "partials/tasks/form" .}}
+  {{template "partials/tasks/list" .}}
+</section>
+{{end}}

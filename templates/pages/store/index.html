@@ -1,0 +1,15 @@
+{{define "pages/store/index-content"}}
+<section class="toolbar"><div><p class="eyebrow">Store</p><h1>Browse Apps</h1><p class="muted">Public Store, Organization Store, Featured Apps, and all app cards.</p></div></section>
+<form class="filterbar" hx-get="/fragments/store/results" hx-target="#store-results" hx-trigger="input changed delay:250ms, change"><label>Search<input name="q" placeholder="app or headline"></label><label>Filter<select name="filter"><option value="">All Apps</option><option value="featured">Featured</option><option value="public">Public</option><option value="org">Organization</option><option value="installed">Installed</option></select></label></form>
+<div id="store-results">{{template "partials/store/list" .}}</div>
+{{end}}
+
+{{define "pages/store/show-content"}}
+{{$app := index .Data "App"}}
+<section class="panel detail"><p class="eyebrow">Store app</p><h1>{{$app.Name}}</h1><p class="lead">{{$app.Headline}}</p><p>{{$app.Description}}</p><div class="chips"><span>{{$app.Visibility}}</span>{{if $app.Featured}}<span>featured</span>{{end}}<span>{{$app.InstallCount}} installs</span></div><form hx-post="/store/apps/{{$app.ID}}/install" hx-target="#store-app-card"><button class="button primary">{{if $app.Installed}}Installed{{else}}Install{{end}}</button></form><div id="store-app-card"></div></section>
+{{end}}
+
+{{define "pages/store/installed-content"}}
+<section class="toolbar"><div><p class="eyebrow">Local tools</p><h1>Installed Apps</h1><p class="muted">Installed state is stored in SQLite.</p></div><a class="button" href="/store">Browse Store</a></section>
+<div id="store-results">{{template "partials/store/list" .}}</div>
+{{end}}

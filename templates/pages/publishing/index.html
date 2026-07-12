@@ -1,0 +1,12 @@
+{{define "pages/publishing/index-content"}}
+<section class="toolbar"><div><p class="eyebrow">Publishing</p><h1>Jobs</h1><p class="muted">Queued/running/succeeded/failed states. Refresh or filter with HTMX.</p></div></section>
+<form class="filterbar" hx-get="/fragments/publishing/jobs" hx-target="#publishing-job-list" hx-trigger="change"><label>Status<select name="status"><option value="">All</option><option>queued</option><option>running</option><option>succeeded</option><option>failed</option></select></label></form>
+<div id="publishing-job-list">{{template "partials/publishing/list" .}}</div>
+{{end}}
+
+{{define "pages/publishing/show-content"}}
+{{$p := index .Data "Project"}}
+<section class="toolbar"><div><p class="eyebrow">Publish Draft</p><h1>{{$p.Name}}</h1><p class="muted">Save a local draft, then create a simulated publishing job.</p></div><form hx-post="/projects/{{$p.ID}}/publish" hx-target="#publishing-job-list"><button class="button primary">Publish</button></form></section>
+<div id="publish-draft-form">{{template "partials/publishing/form" .}}</div>
+<h2>Recent jobs</h2><div id="publishing-job-list" hx-get="/fragments/publishing/jobs" hx-trigger="load">Loading…</div>
+{{end}}

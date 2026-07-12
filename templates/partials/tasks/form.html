@@ -1,0 +1,9 @@
+{{define "partials/tasks/form"}}
+<form class="task-form" hx-post="/tasks" hx-target="#task-list" hx-swap="outerHTML">
+  <label for="task-title">New task</label>
+  <div class="inline-controls">
+    <input id="task-title" name="title" type="text" placeholder="Write a task" autocomplete="off">
+    <button type="submit" class="button primary">Add</button>
+  </div>
+</form>
+{{end}}

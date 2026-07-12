@@ -1,0 +1,13 @@
+{{define "partials/publishing/form"}}
+{{$d := index .Data "Draft"}}
+{{if .Flash}}<div class="notice">{{.Flash}}</div>{{end}}
+<form class="panel form-stack" hx-post="/projects/{{$d.ProjectID}}/publish/draft" hx-target="#publish-draft-form">
+<label>App name<input name="app_name" required value="{{$d.AppName}}"></label>
+<label>Headline<input name="headline" required value="{{$d.Headline}}"></label>
+<label>Description<textarea name="description" required>{{$d.Description}}</textarea></label>
+<label>Changelog<textarea name="changelog">{{$d.Changelog}}</textarea></label>
+<div class="grid two"><label>Target<select name="publish_target"><option value="public">Public</option><option value="organization">Organization</option></select></label><label>Visibility<select name="visibility"><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label></div>
+<label>Screenshot manifest<textarea name="screenshot_manifest">{{$d.ScreenshotManifest}}</textarea></label>
+<button class="button primary">Save draft</button>
+</form>
+{{end}}

@@ -1,7 +1,7 @@
 {{define "pages/projects/index-content"}}
 <section class="toolbar">
   <div><p class="eyebrow">Workspace</p><h1>My Projects</h1><p class="muted">Create, open, archive, and launch project-bound agent sessions.</p></div>
-  <a class="button primary" href="/projects/new">Create New Project</a>
+  <a class="button primary" href="/projects/new">Create Project</a>
 </section>
 <form class="filterbar" hx-get="/fragments/projects/list" hx-target="#project-list" hx-trigger="input changed delay:250ms, change">
   <label>Search <input name="q" value="{{index .Data "Q"}}" placeholder="Project name"></label>

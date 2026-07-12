@@ -1,5 +1,6 @@
 {{define "pages/settings/index-content"}}
 <section class="toolbar"><div><p class="eyebrow">Preferences</p><h1>Settings</h1><p class="muted">Local account, appearance, and agent shortcut preferences.</p></div></section>
-<nav class="tabs"><a href="/settings">General</a><a href="/settings/appearance">Appearance</a><a href="/settings/agent">Agent</a></nav>
+{{$section := index .Data "Section"}}
+<nav class="tabs"><a href="/settings"{{if eq $section "general"}} class="active"{{end}}>General</a><a href="/settings/appearance"{{if eq $section "appearance"}} class="active"{{end}}>Appearance</a><a href="/settings/agent"{{if eq $section "agent"}} class="active"{{end}}>Agent</a></nav>
 <div id="settings-panel">{{template "partials/settings/form" .}}</div>
 {{end}}

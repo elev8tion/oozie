@@ -1,8 +1,11 @@
 package projects
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"oozie/internal/web/render"
 )
@@ -320,6 +323,50 @@ func (h *Handlers) RemoveStoreApp(w http.ResponseWriter, r *http.Request) {
 	}
 	h.renderer.HTML(w, 200, "partials/store/flash", render.ViewData{Flash: "App removed from your store. Republish the project to bring it back."})
 }
+// ExportRecipe downloads an app as a shareable recipe file — prompts, not
+// binaries.
+func (h *Handlers) ExportRecipe(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	rec, err := h.service.ExportRecipe(r.Context(), id)
+	if err != nil {
+		h.errorPage(w, r, 422, err.Error())
+		return
+	}
+	body, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		h.errorPage(w, r, 500, "Couldn't encode the recipe.")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(rec.Name, `"`, "")+`.oozie-recipe.json"`)
+	_, _ = w.Write(body)
+}
+
+func (h *Handlers) ImportRecipePage(w http.ResponseWriter, r *http.Request) {
+	h.page(w, r, "Import Recipe · oozie", "pages/recipes/import-content", nil)
+}
+
+func (h *Handlers) ImportRecipe(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	raw := r.FormValue("recipe")
+	if raw == "" {
+		if file, _, err := r.FormFile("recipe_file"); err == nil {
+			defer file.Close()
+			body, _ := io.ReadAll(io.LimitReader(file, 8<<20))
+			raw = string(body)
+		}
+	}
+	project, err := h.service.ImportRecipe(r.Context(), raw)
+	if err != nil {
+		h.page(w, r, "Import Recipe · oozie", "pages/recipes/import-content", map[string]any{"Error": err.Error(), "Recipe": raw})
+		return
+	}
+	http.Redirect(w, r, "/projects/"+strconv.FormatInt(project.ID, 10)+"/agent", http.StatusSeeOther)
+}
+
 // RemixApp forks a store app into a new project with a mutation prompt
 // and drops the user onto the new project's agent page.
 func (h *Handlers) RemixApp(w http.ResponseWriter, r *http.Request) {

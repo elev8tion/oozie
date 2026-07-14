@@ -2,6 +2,7 @@ package projects
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -330,5 +331,45 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestRecipeRoundTrip exports a published app as a recipe and imports it
+// back into a fresh project.
+func TestRecipeRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	dir := filepath.Join(t.TempDir(), "r")
+	p, _ := s.CreateProject(ctx, "Recipe App", dir, true)
+	id, _ := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Recipe App", Headline: "hl", Description: "de"}, "", "recipe-app")
+	session, _ := s.repo.GetSession(ctx, p.ID)
+	_, _ = s.repo.CreateAgentRequest(ctx, session.ID, "build", "build me a timer")
+	_, _ = s.repo.CreateAgentRequest(ctx, session.ID, "build", "make it purple")
+
+	rec, err := s.ExportRecipe(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Kind != "oozie-recipe/v1" || len(rec.Prompts) != 2 || rec.Prompts[1] != "make it purple" {
+		t.Fatalf("recipe = %+v", rec)
+	}
+
+	// Import: agent send fails without pi, but the project must exist and
+	// carry the recipe's identity.
+	raw, _ := json.Marshal(rec)
+	imported, err := s.ImportRecipe(ctx, string(raw))
+	if _, ok := err.(ErrValidation); !ok {
+		t.Fatalf("expected agent-unavailable validation error, got %v", err)
+	}
+	if imported.ID == 0 || imported.Name != "Recipe App" {
+		t.Fatalf("imported project = %+v", imported)
+	}
+	home, _ := os.UserHomeDir()
+	if _, err := os.Stat(filepath.Join(home, "Projects", "recipe-app")); err == nil {
+		os.RemoveAll(filepath.Join(home, "Projects", "recipe-app"))
+	}
+
+	if _, err := s.ImportRecipe(ctx, `{"kind":"nope"}`); err == nil {
+		t.Fatal("wrong kind must be rejected")
 	}
 }

@@ -1,0 +1,11 @@
+{{define "pages/recipes/import-content"}}
+<section class="toolbar"><div><p class="eyebrow">Recipes</p><h1>Import a Recipe</h1><p class="muted">A recipe is an app shared as prompts, not a binary. Your local agent rebuilds it here, adapted to your machine.</p></div></section>
+{{if index .Data "Error"}}<div class="notice error">{{index .Data "Error"}}</div>{{end}}
+<form method="post" action="/recipes/import" enctype="multipart/form-data" class="panel form-stack narrow">
+  <label>Paste a recipe<textarea name="recipe" rows="10" placeholder='{"kind":"oozie-recipe/v1", …}'>{{index .Data "Recipe"}}</textarea></label>
+  <label>…or upload a .oozie-recipe.json file<input type="file" name="recipe_file" accept=".json,application/json"></label>
+  <div class="actions"><button class="button primary">Import &amp; rebuild</button></div>
+</form>
+{{end}}
+
+{{define "pages/recipes/import-placeholder"}}<div></div>{{end}}

@@ -338,6 +338,25 @@ func (r *Repo) ExpiredAppIDs(ctx context.Context) ([]int64, error) {
 	return out, rows.Err()
 }
 
+// UserPrompts returns every user message ever sent to a project's agent,
+// oldest first — the app's genome, for recipe export.
+func (r *Repo) UserPrompts(ctx context.Context, projectID int64) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT m.content FROM agent_messages m JOIN agent_requests ar ON ar.id=m.request_id JOIN agent_sessions s ON s.id=ar.session_id WHERE s.project_id=? AND m.role='user' ORDER BY m.created_at, m.id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // StoreAppSlugForProject returns the published slug for a project, or ""
 // when the project has never been published.
 func (r *Repo) StoreAppSlugForProject(ctx context.Context, projectID int64) (string, error) {

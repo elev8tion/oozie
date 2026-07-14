@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -120,11 +121,21 @@ func assembleBundle(workdir, appName, executable, beaconURL string) (string, err
 		return "", err
 	}
 
-	// Ad-hoc sign so Finder and Gatekeeper treat the bundle as intact.
+	// Sign so Finder and Gatekeeper treat the bundle as intact. With
+	// OOZIE_SIGN_IDENTITY set to a keychain code-signing identity, updates
+	// keep the same signer, so TCC permission grants (Screen Recording,
+	// Accessibility) survive republishes; ad-hoc ("-") re-identifies the
+	// app on every build and macOS forgets its permissions.
 	// Failure is non-fatal: the executable is already linker-signed.
 	if _, err := exec.LookPath("codesign"); err == nil {
-		if out, err := exec.Command("codesign", "--force", "--deep", "-s", "-", bundle).CombinedOutput(); err != nil {
+		identity := signingIdentity()
+		if out, err := exec.Command("codesign", "--force", "--deep", "-s", identity, bundle).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "codesign (non-fatal): %s\n", strings.TrimSpace(string(out)))
+			if identity != "-" {
+				// Named identity failed (missing cert?) — fall back to ad-hoc
+				// so the bundle still verifies.
+				_ = exec.Command("codesign", "--force", "--deep", "-s", "-", bundle).Run()
+			}
 		}
 	}
 
@@ -188,6 +199,39 @@ func installIcon(workdir, bundle string) bool {
 		return false
 	}
 	return exec.Command("iconutil", "-c", "icns", set, "-o", target).Run() == nil
+}
+
+var (
+	identityOnce   sync.Once
+	cachedIdentity string
+)
+
+// signingIdentity picks the signer for published bundles:
+// OOZIE_SIGN_IDENTITY, else the first valid code-signing identity in the
+// keychain, else ad-hoc. A stable identity means TCC permission grants
+// survive republishes.
+func signingIdentity() string {
+	identityOnce.Do(func() {
+		cachedIdentity = "-"
+		if env := os.Getenv("OOZIE_SIGN_IDENTITY"); env != "" {
+			cachedIdentity = env
+			return
+		}
+		out, err := exec.Command("security", "find-identity", "-p", "codesigning", "-v").Output()
+		if err != nil {
+			return
+		}
+		// Lines look like: 1) <40-hex-sha1> "Apple Development: Name (TEAM)"
+		for _, line := range strings.Split(string(out), "\n") {
+			if i := strings.Index(line, `"`); i >= 0 {
+				if j := strings.LastIndex(line, `"`); j > i {
+					cachedIdentity = line[i+1 : j]
+					return
+				}
+			}
+		}
+	})
+	return cachedIdentity
 }
 
 func fileExists(path string) bool {

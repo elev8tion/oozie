@@ -47,7 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
 		}
 	}
 
+	// oozie's home port: stable so beacon URLs and Help-menu improve links
+	// baked into published apps keep working across restarts. Falls back
+	// to an ephemeral port only if something else owns it.
+	static let preferredPort: UInt16 = 40470
+
 	static func freePort() -> UInt16 {
+		if portAvailable(preferredPort) { return preferredPort }
 		let sock = socket(AF_INET, SOCK_STREAM, 0)
 		defer { close(sock) }
 		var addr = sockaddr_in()
@@ -70,6 +76,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
 			}
 		}
 		return UInt16(bigEndian: out.sin_port)
+	}
+
+	static func portAvailable(_ port: UInt16) -> Bool {
+		let sock = socket(AF_INET, SOCK_STREAM, 0)
+		defer { close(sock) }
+		var yes: Int32 = 1
+		setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+		var addr = sockaddr_in()
+		addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+		addr.sin_family = sa_family_t(AF_INET)
+		addr.sin_port = port.bigEndian
+		addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+		let ok = withUnsafePointer(to: &addr) {
+			$0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+				Darwin.bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+			}
+		}
+		return ok == 0
 	}
 
 	// MARK: window

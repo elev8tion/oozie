@@ -19,3 +19,20 @@
 - [x] **Idle reaping**: pi processes idle for 30+ minutes are stopped automatically; sessions persist on disk so the next prompt resumes with full context.
 
 Nothing is known to be missing or fake. Future ideas, not commitments: SSE instead of polling, per-message model attribution, publish-time version bumping.
+
+## Living-apps release (2026-07-14, smoke-tested live)
+
+Plan: `Plans/living-apps.md`. All nine features shipped, one commit each, tests green throughout:
+
+- [x] **Foundation**: WAL + busy_timeout + per-connection foreign_keys via DSN; `agent_messages(request_id)` index; startup sweeps fail orphaned publish jobs and stale wishes.
+- [x] **Liveness beacon**: launcher shim in every published bundle pings `/api/beacon/<slug>` and execs the real binary; store rows show launch counts/recency and a dormant badge. (Verified in the swift-build test: shim written, binary beside it, bundle still signs and runs.)
+- [x] **Fix-me wormhole**: `/improve/<slug>` files a BUILD request; on completion oozie republishes and reinstalls automatically. System prompt requires a Help-menu "Improve this app…" item in every GUI app. (Loop covered by tests.)
+- [x] **Disposable apps**: publish-form lifetime picker → `expires_at`; hourly reaper removes expired apps. (Covered by test.)
+- [x] **Remix**: store page forks source (minus `.build/`, `dist/`, `.git/`) into a new project with a mutation prompt. (Covered by test.)
+- [x] **Recipes**: export prompts+design+icon as `.oozie-recipe.json`; import rebuilds locally. (Round-trip covered by test.)
+- [x] **Wish inbox + fairy**: wishes page, build-now, and a nightly scheduler (settings: enabled + hour) that grants up to 3 wishes and auto-publishes. (Lifecycle covered by test.)
+- [x] **Insights**: dashboard strip — dormant apps, most-used app, waiting wishes.
+- [x] **Taste**: `TASTE.md` beside the DB, editable in Settings, refreshed into every workdir before agent runs, appended with remix/fix/surgery signals; prompt tells the agent it overrides DESIGN.md.
+- [x] **Surgery**: capture via the project's visual-review script, click-to-target UI, agent request carries the click coordinates; rides the improve loop for auto-republish.
+
+Caveats worth knowing: the fairy builds wishes in **trusted** projects (unattended runs can't answer permission prompts); wish→request linkage is in-memory, so a restart mid-build fails the wish honestly at the next startup; surgery's executable-name guess is the app name without spaces — capture reports the script's error output if that misses.

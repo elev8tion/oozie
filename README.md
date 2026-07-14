@@ -9,6 +9,20 @@ A Mac app for building mini Mac apps. oozie runs entirely on your machine: you d
 3. **Publish** — save a draft (name, headline, description), hit Publish. A real job runs `swift build -c release` and wraps the executable in `dist/<Name>.app` (ad-hoc signed; an `icon.png`/`icon.icns` at the project root becomes the app icon); on success the app appears in your Store.
 4. **Install & open** — Install copies the bundle to `~/Applications`; Open launches it.
 
+## Living apps
+
+Published apps aren't frozen artifacts — they stay connected to the factory:
+
+- **Fix-me wormhole** — every published app's Help menu links to `/improve/<slug>`; a request typed there becomes an agent build, and oozie republishes and reinstalls the app automatically when the work lands
+- **Liveness beacon** — bundles launch through a shim that pings oozie (localhost only), so the Store shows real usage ("opened 12× · last 2h ago") and flags dormant apps
+- **Surgery** — click a point on a live screenshot of the app, describe the change, and the agent finds that element in the source and operates
+- **Remix** — fork any store app's source into a new project with a mutation prompt ("like this, but for reading sessions")
+- **Recipes** — export an app as prompts + design + icon JSON and import it on any oozie; share apps as intent, not binaries
+- **Disposable apps** — publish with a TTL; the hourly reaper uninstalls and delists them when time's up (the project survives)
+- **Wish inbox + nightly build fairy** — drop in app ideas by day; at your chosen hour the fairy builds and publishes up to three overnight
+- **Taste** — `TASTE.md`, your design genome: editable in Settings, seeded fresh into every project, fed by your remix and fix signals, and it overrides the generic design standard
+- **Insights** — the dashboard notices dormant apps, heavy-use apps worth a polish pass, and wishes left waiting
+
 ## Features
 
 - Project dashboard: create/open/archive, search and filter

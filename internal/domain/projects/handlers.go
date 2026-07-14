@@ -515,7 +515,18 @@ func (h *Handlers) BuildWish(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) Settings(w http.ResponseWriter, r *http.Request) {
 	s, _ := h.service.GetSettings(r.Context())
-	h.page(w, r, "Settings · oozie", "pages/settings/index-content", map[string]any{"Settings": s})
+	h.page(w, r, "Settings · oozie", "pages/settings/index-content", map[string]any{"Settings": s, "Taste": h.service.LoadTaste()})
+}
+
+// SaveTaste persists the user's design voice; it flows into every project
+// the next time the agent works there.
+func (h *Handlers) SaveTaste(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	flash, errMsg := "Taste saved — every project inherits it on the agent's next run.", ""
+	if err := h.service.SaveTaste(r.FormValue("taste")); err != nil {
+		flash, errMsg = "", err.Error()
+	}
+	h.renderer.HTML(w, 200, "partials/settings/taste", render.ViewData{Flash: flash, Err: errMsg, Data: map[string]any{"Taste": h.service.LoadTaste()}})
 }
 func (h *Handlers) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()

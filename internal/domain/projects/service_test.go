@@ -36,6 +36,8 @@ func newTestService(t *testing.T) *Service {
 	if err := db.RunMigrations(database, os.DirFS(filepath.Join("..", "..", "..", "migrations"))); err != nil {
 		t.Fatal(err)
 	}
+	tasteDirOverride = t.TempDir()
+	t.Cleanup(func() { tasteDirOverride = "" })
 	return NewService(NewRepo(database))
 }
 
@@ -432,5 +434,34 @@ func TestWishLifecycle(t *testing.T) {
 	}
 	if apps, _ := s.ListStoreApps(ctx, "", ""); len(apps) != 1 {
 		t.Fatalf("granted wish should have published an app, got %d", len(apps))
+	}
+}
+
+// TestTasteAccumulatesSignals proves remix mutations land in TASTE.md and
+// that the taste file is materialized into project workdirs.
+func TestTasteAccumulatesSignals(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	srcDir := filepath.Join(t.TempDir(), "t")
+	p, _ := s.CreateProject(ctx, "Tasteful", srcDir, true)
+	id, _ := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Tasteful", Headline: "h", Description: "d"}, "", "tasteful")
+	writeTestFile(t, filepath.Join(srcDir, "Package.swift"), "// p")
+
+	_, _ = s.RemixApp(ctx, id, "menu-bar apps over windows, always")
+	home, _ := os.UserHomeDir()
+	t.Cleanup(func() { os.RemoveAll(filepath.Join(home, "Projects", "tasteful-remix")) })
+
+	taste := s.LoadTaste()
+	if !strings.Contains(taste, "menu-bar apps over windows") || !strings.Contains(taste, "[remix Tasteful]") {
+		t.Fatalf("remix signal missing from taste:\n%s", taste)
+	}
+	dir := filepath.Join(t.TempDir(), "mat")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.materializeTaste(dir)
+	body, err := os.ReadFile(filepath.Join(dir, "TASTE.md"))
+	if err != nil || !strings.Contains(string(body), "menu-bar apps") {
+		t.Fatalf("taste not materialized: %v", err)
 	}
 }

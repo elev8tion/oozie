@@ -223,6 +223,7 @@ func (s *Service) sendAgentMessage(ctx context.Context, projectID int64, mode, m
 	if err != nil {
 		return 0, ErrValidation{"Project directory unavailable: " + err.Error()}
 	}
+	s.materializeTaste(workdir)
 	requestID, err := s.repo.CreateAgentRequest(ctx, session.ID, mode, message)
 	if err != nil {
 		return 0, err
@@ -425,6 +426,7 @@ func (s *Service) RemixApp(ctx context.Context, appID int64, mutation string) (P
 	if err := copyProjectTree(srcDir, dstDir); err != nil {
 		return remix, ErrValidation{"Copied project incompletely: " + err.Error()}
 	}
+	s.appendTasteSignal("remix "+app.Name, mutation)
 	msg := fmt.Sprintf("This project is a remix of %q — its full source was copied here as the starting point.\n\nMutation requested by the user:\n\n%s\n\nApply the mutation: rename the app appropriately (update Package.swift target/product names and any user-visible names), implement the change, keep what still serves the new purpose, delete what doesn't, generate a fresh icon that fits the new identity, and verify with a build and visual review.", app.Name, mutation)
 	if _, err := s.sendAgentMessage(ctx, remix.ID, "build", msg); err != nil {
 		return remix, err
@@ -496,6 +498,7 @@ func (s *Service) FileImprovement(ctx context.Context, slug, text string) error 
 	if err != nil {
 		return err
 	}
+	s.appendTasteSignal("improve "+app.Name, text)
 	return s.repo.InsertImproveRequest(ctx, requestID, app.ID, text)
 }
 func (s *Service) Question(projectID, requestID int64, rpcID, prompt, optionsJSON string) {
@@ -585,6 +588,7 @@ Producing Mac apps (oozie's publish pipeline):
 - Every app gets an icon before it's done. Generate one on-device with Apple Intelligence: sh Tools/generate-icon.sh "flat minimal app icon of <subject> on a rounded square <color> background, no text" icon.png — then read icon.png to confirm it fits the app. If generation is unavailable (Apple Intelligence disabled), draw a simple icon.png with AppKit instead (rounded rect, gradient, bold SF-Symbol-like glyph). oozie converts icon.png at the project root into the .app icon when publishing.
 
 Design quality (non-negotiable):
+- The project root contains TASTE.md — the user's personal design voice, distilled from every app they've kept, fixed, and remixed. Read it before any UI work; its rules override DESIGN.md's generic choices wherever they conflict.
 - The project root contains DESIGN.md — read it before any UI work and follow it. It is the visual/UX standard for every app built here: native macOS feel, HIG-aligned layout on an 8pt grid, semantic system colors with full dark-mode support, system text styles, SF Symbols (never emoji as icons), designed empty/loading/error states, keyboard shortcuts, confirmation for destructive actions, and accessibility labels.
 - "It compiles" is not done. Done means: build passes AND every screen looks intentional in light and dark mode with no default-looking, cramped, or misaligned UI.
 

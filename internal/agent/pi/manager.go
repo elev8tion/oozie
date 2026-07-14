@@ -2,15 +2,24 @@ package pi
 
 import (
 	"bufio"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
+
+// approvalExtension gates mutating tool calls behind a confirm dialog for
+// untrusted projects. pi's --no-approve only ignores project-local config;
+// it does not restrict tools, so this extension is the actual enforcement.
+//
+//go:embed approval.ts
+var approvalExtension []byte
 
 // Sink receives agent activity so the caller can persist it. Calls arrive
 // from the process reader goroutine, never concurrently for one project.
@@ -25,11 +34,12 @@ type Sink interface {
 
 // Manager owns one pi RPC subprocess per project.
 type Manager struct {
-	mu      sync.Mutex
-	procs   map[int64]*proc
-	sink    Sink
-	catalog Catalog
-	binary  string
+	mu          sync.Mutex
+	procs       map[int64]*proc
+	sink        Sink
+	catalog     Catalog
+	binary      string
+	approvalExt string // path to the materialized approval extension
 }
 
 func NewManager(catalog Catalog, sink Sink) *Manager {
@@ -37,7 +47,19 @@ func NewManager(catalog Catalog, sink Sink) *Manager {
 	if binary == "" {
 		binary = "pi"
 	}
-	return &Manager{procs: map[int64]*proc{}, sink: sink, catalog: catalog, binary: binary}
+	return &Manager{procs: map[int64]*proc{}, sink: sink, catalog: catalog, binary: binary, approvalExt: materializeApprovalExtension()}
+}
+
+// materializeApprovalExtension writes the embedded approval extension to a
+// stable path so pi can load it via -e. Returns "" on failure, in which
+// case untrusted projects refuse to start rather than run ungated.
+func materializeApprovalExtension() string {
+	path := filepath.Join(os.TempDir(), "oozie-approval-extension.ts")
+	if err := os.WriteFile(path, approvalExtension, 0o644); err != nil {
+		log.Printf("pi: cannot write approval extension: %v", err)
+		return ""
+	}
+	return path
 }
 
 // StartOptions describe how to launch pi for a project.
@@ -146,7 +168,14 @@ func (m *Manager) ensure(opts StartOptions) (*proc, error) {
 	if opts.Trusted {
 		args = append(args, "--approve")
 	} else {
-		args = append(args, "--no-approve")
+		// --no-approve only ignores project-local config files; the
+		// approval extension is what gates write/edit/bash behind the
+		// permission panel. Without it an untrusted project would run
+		// fully unrestricted, so fail closed instead.
+		if m.approvalExt == "" {
+			return nil, fmt.Errorf("approval extension unavailable; refusing to start agent for untrusted project")
+		}
+		args = append(args, "--no-approve", "-e", m.approvalExt)
 	}
 
 	cmd := exec.Command(m.binary, args...)

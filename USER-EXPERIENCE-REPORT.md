@@ -27,8 +27,10 @@ This is the flow that matters, and it delivers:
 
 ## 2. Where It Falls Short — Ranked by User Impact
 
-### 🔴 P0 — Trust model is not enforced
-Created a project with **Trusted unchecked**, then asked the agent to write a file. **It wrote to disk immediately with no permission prompt.** The timeline showed `write (ok)` with zero approval step. The Trusted checkbox — the app's only safety affordance — is cosmetic in practice. Either the `--approve` mapping is inverted/ignored, or pi's defaults allow cwd writes regardless. Until this is fixed, the untrusted state is a false promise.
+### 🔴 P0 — Trust model is not enforced — ✅ FIXED 2026-07-14
+Created a project with **Trusted unchecked**, then asked the agent to write a file. **It wrote to disk immediately with no permission prompt.** The timeline showed `write (ok)` with zero approval step. The Trusted checkbox — the app's only safety affordance — was cosmetic in practice.
+
+Root cause: pi's `--approve`/`--no-approve` flags control whether *project-local config files* are trusted — they never gated tool execution. Fix: an embedded pi extension (`internal/agent/pi/approval.ts`), loaded via `-e` for untrusted projects only, intercepts `write`/`edit`/`bash` tool calls and blocks on a `confirm` dialog that renders in oozie's existing permission panel. Verified live: prompt appears with tool + path/command detail, Deny blocks the write (`write (error)`, nothing on disk, model explains), Approve lets it through, and trusted projects still run prompt-free. If the extension can't be materialized, untrusted agents refuse to start (fail closed).
 
 ### 🔴 P0 — Publishing is theater
 - Clicking Publish instantly shows "Publish succeeded." — the job is inserted directly as `succeeded`, no lifecycle.

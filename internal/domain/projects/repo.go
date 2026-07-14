@@ -94,6 +94,11 @@ func (r *Repo) StoreAppIDForProject(ctx context.Context, projectID int64) (int64
 	return id, err
 }
 
+func (r *Repo) SetTrusted(ctx context.Context, id int64, trusted bool) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE projects SET trusted=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, trusted, id)
+	return err
+}
+
 func (r *Repo) ArchiveProject(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE projects SET archived=1, status='archived', updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err

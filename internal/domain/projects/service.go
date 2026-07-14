@@ -154,6 +154,23 @@ func (s *Service) ArchiveProject(ctx context.Context, id int64) error {
 	return s.repo.ArchiveProject(ctx, id)
 }
 
+// SetTrusted flips a project's trust flag. Trust is applied when the pi
+// process launches (--approve vs the approval extension), so any running
+// process is stopped; the next message relaunches it with the new mode
+// against the same pi session.
+func (s *Service) SetTrusted(ctx context.Context, id int64, trusted bool) error {
+	if _, err := s.repo.GetProject(ctx, id); err != nil {
+		return err
+	}
+	if err := s.repo.SetTrusted(ctx, id, trusted); err != nil {
+		return err
+	}
+	if s.agent != nil {
+		s.agent.StopProject(id)
+	}
+	return nil
+}
+
 // DeleteProject permanently removes a project: its pi process is stopped,
 // its store listing (and installed copy) removed, and every DB trace
 // cascades away. With deleteFiles, the working directory is deleted too —

@@ -87,6 +87,21 @@ func (h *Handlers) ShowProject(w http.ResponseWriter, r *http.Request) {
 	}
 	h.page(w, r, p.Name+" · oozie", "pages/projects/show-content", map[string]any{"Project": p})
 }
+// SetTrusted toggles a project between trusted (agent runs unattended)
+// and confirm mode (every mutating tool call needs approval).
+func (h *Handlers) SetTrusted(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	_ = r.ParseForm()
+	if err := h.service.SetTrusted(r.Context(), id, r.FormValue("trusted") == "on"); err != nil {
+		h.errorPage(w, r, 422, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/projects/"+strconv.FormatInt(id, 10), 303)
+}
+
 func (h *Handlers) ArchiveProject(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.pathID(w, r, "id")
 	if !ok {

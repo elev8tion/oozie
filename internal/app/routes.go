@@ -27,6 +27,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /projects", h.CreateProject)
 	mux.HandleFunc("GET /projects/{id}", h.ShowProject)
 	mux.HandleFunc("POST /projects/{id}/archive", h.ArchiveProject)
+	mux.HandleFunc("POST /projects/{id}/trust", h.SetTrusted)
 	mux.HandleFunc("POST /projects/{id}/delete", h.DeleteProject)
 	mux.HandleFunc("GET /fragments/projects/list", h.ProjectsList)
 

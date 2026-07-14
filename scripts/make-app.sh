@@ -1,27 +1,36 @@
 #!/bin/sh
-# Builds dist/oozie.app — a double-clickable Mac app that starts the oozie
-# server and opens it in your default browser. The Go binary is fully
-# self-contained (templates, CSS, JS, and migrations are embedded).
+# Builds dist/oozie.app — a native Mac app: a Swift/WKWebView shell that
+# runs the embedded oozie-server on a free localhost port and hosts the UI
+# in its own window. The Go binary is fully self-contained (templates,
+# CSS, JS, and migrations are embedded).
 set -eu
 
 cd "$(dirname "$0")/.."
 
 APP="dist/oozie.app"
 MACOS="$APP/Contents/MacOS"
+RESOURCES="$APP/Contents/Resources"
 
 go build -o /tmp/oozie-server ./cmd/app
 
 rm -rf "$APP"
-mkdir -p "$MACOS"
+mkdir -p "$MACOS" "$RESOURCES"
 mv /tmp/oozie-server "$MACOS/oozie-server"
 
-cat > "$MACOS/oozie" <<'EOF'
-#!/bin/sh
-DIR="$(cd "$(dirname "$0")" && pwd)"
-export OOZIE_OPEN_BROWSER=1
-exec "$DIR/oozie-server"
-EOF
-chmod 755 "$MACOS/oozie"
+# Native window shell.
+swiftc -O scripts/OozieApp.swift -o "$MACOS/oozie"
+
+# App icon: render PNG, then convert to icns.
+swift scripts/make-icon.swift dist/icon.png
+ICONSET="dist/AppIcon.iconset"
+rm -rf "$ICONSET"; mkdir -p "$ICONSET"
+for s in 16 32 128 256 512; do
+  sips -z "$s" "$s" dist/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  d=$((s * 2))
+  sips -z "$d" "$d" dist/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$RESOURCES/AppIcon.icns"
+rm -rf "$ICONSET" dist/icon.png
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,8 +43,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 	<key>CFBundleIdentifier</key><string>local.oozie.workspace</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>1.0.0</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>
-	<key>LSUIElement</key><true/>
 </dict>
 </plist>
 EOF

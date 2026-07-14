@@ -22,7 +22,7 @@ A Mac app for building mini Mac apps. oozie runs entirely on your machine: you d
 
 ```bash
 make run          # dev server on http://127.0.0.1:8080
-make app          # build dist/oozie.app (double-clickable)
+make app          # build dist/oozie.app (native window app)
 make install-app  # build and install oozie.app into ~/Applications
 make test         # go test ./...
 ```
@@ -40,7 +40,7 @@ The binary is fully self-contained (templates, CSS, JS, and migrations are embed
 - `ADDR` (default `127.0.0.1:8080`)
 - `DATABASE_PATH` (default `~/Library/Application Support/oozie/app.db`)
 - `PI_BIN` (default `pi`) — path to the pi binary
-- `OOZIE_OPEN_BROWSER=1` — open the UI in the default browser on start (the .app bundle sets this)
+- `OOZIE_OPEN_BROWSER=1` — open the UI in the default browser on start (useful with `make run`)
 
 ## Stack
 

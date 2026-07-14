@@ -512,3 +512,62 @@ func TestStalePromptsSweptAtStartup(t *testing.T) {
 		t.Fatalf("stale question survived the sweep: %+v", q)
 	}
 }
+
+// TestDeleteProjectPermanently: deletion removes the project, its agent
+// history, its store listing — and only touches disk when asked, guarded
+// to real project dirs.
+func TestDeleteProjectPermanently(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	s.SetBuilder(fakeBuilder{})
+	home, _ := os.UserHomeDir()
+	workdir := filepath.Join(home, "Projects", "oozie-delete-test")
+	t.Cleanup(func() { os.RemoveAll(workdir) })
+	p, _ := s.CreateProject(ctx, "Doomed", workdir, true)
+	_ = s.SaveDraft(ctx, PublishDraft{ProjectID: p.ID, AppName: "Doomed", Headline: "h", Description: "d"})
+	if err := s.Publish(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.WaitForJobs()
+	session, _ := s.repo.GetSession(ctx, p.ID)
+	_, _ = s.repo.CreateAgentRequest(ctx, session.ID, "build", "hello")
+
+	if err := s.DeleteProject(ctx, p.ID, true); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := s.GetProject(ctx, p.ID); err == nil {
+		t.Fatal("project still exists")
+	}
+	if apps, _ := s.ListStoreApps(ctx, "", ""); len(apps) != 0 {
+		t.Fatalf("store app survived deletion: %v", apps)
+	}
+	if prompts, _ := s.repo.UserPrompts(ctx, p.ID); len(prompts) != 0 {
+		t.Fatalf("agent history survived deletion: %v", prompts)
+	}
+	if _, err := os.Stat(workdir); err == nil {
+		t.Fatal("workdir survived delete_files=true")
+	}
+}
+
+// TestSafeDeleteGuards: the disk guard refuses anything outside home or
+// at the top level of home.
+func TestSafeDeleteGuards(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{home, filepath.Join(home, "Documents"), "/tmp/whatever", "/"} {
+		if err := safeDeleteProjectDir(dir); err == nil {
+			t.Errorf("guard allowed deleting %s", dir)
+		}
+	}
+	// A legit project dir two levels deep is allowed.
+	ok := filepath.Join(home, "Projects", "oozie-guard-test")
+	if err := os.MkdirAll(ok, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := safeDeleteProjectDir(ok); err != nil {
+		t.Errorf("guard refused a legit project dir: %v", err)
+	}
+	// Deleting a dir that's already gone is fine.
+	if err := safeDeleteProjectDir(ok); err != nil {
+		t.Errorf("guard errored on missing dir: %v", err)
+	}
+}

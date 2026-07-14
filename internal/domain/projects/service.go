@@ -153,6 +153,64 @@ func (s *Service) CreateProject(ctx context.Context, name, path string, trusted 
 func (s *Service) ArchiveProject(ctx context.Context, id int64) error {
 	return s.repo.ArchiveProject(ctx, id)
 }
+
+// DeleteProject permanently removes a project: its pi process is stopped,
+// its store listing (and installed copy) removed, and every DB trace
+// cascades away. With deleteFiles, the working directory is deleted too —
+// guarded so only real project dirs under the home folder are touched.
+func (s *Service) DeleteProject(ctx context.Context, id int64, deleteFiles bool) error {
+	project, err := s.repo.GetProject(ctx, id)
+	if err != nil {
+		return err
+	}
+	if s.agent != nil {
+		s.agent.StopProject(id)
+	}
+	if appID, err := s.repo.StoreAppIDForProject(ctx, id); err == nil && appID != 0 {
+		if err := s.RemoveStoreApp(ctx, appID); err != nil {
+			return ErrValidation{"Couldn't remove the published app first: " + err.Error()}
+		}
+	}
+	if err := s.repo.DeleteProject(ctx, id); err != nil {
+		return err
+	}
+	if deleteFiles {
+		dir, err := resolveWorkdir(project)
+		if err == nil {
+			if err := safeDeleteProjectDir(dir); err != nil {
+				return ErrValidation{"Project deleted, but its files were kept: " + err.Error()}
+			}
+		}
+	}
+	return nil
+}
+
+// safeDeleteProjectDir refuses to delete anything that isn't a plain
+// directory strictly inside the user's home folder — the guard between
+// "delete my experiment" and "delete my home directory".
+func safeDeleteProjectDir(dir string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	clean := filepath.Clean(dir)
+	if clean == home || !strings.HasPrefix(clean, home+string(filepath.Separator)) {
+		return fmt.Errorf("%s is outside your home folder — delete it manually", clean)
+	}
+	// Refuse first-level dirs like ~/Documents; projects live at least two
+	// levels deep (~/Projects/<name>).
+	if filepath.Dir(clean) == home {
+		return fmt.Errorf("%s is a top-level folder — delete it manually", clean)
+	}
+	info, err := os.Lstat(clean)
+	if err != nil {
+		return nil // already gone: fine
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", clean)
+	}
+	return os.RemoveAll(clean)
+}
 func (s *Service) AgentPage(ctx context.Context, projectID int64) (AgentPage, error) {
 	p, err := s.repo.GetProject(ctx, projectID)
 	if err != nil {
@@ -527,6 +585,20 @@ func (s *Service) AgentError(projectID, requestID int64, message string) {
 }
 
 func projectWorkdir(p Project) (string, error) {
+	path, err := resolveWorkdir(p)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return "", err
+	}
+	seedProject(path)
+	return path, nil
+}
+
+// resolveWorkdir expands the project's path without creating or seeding
+// anything (deletion must never mkdir what it's about to remove).
+func resolveWorkdir(p Project) (string, error) {
 	path := strings.TrimSpace(p.ProjectPathDisplay)
 	if path == "" {
 		path = "~/Projects/" + strings.ToLower(strings.ReplaceAll(p.Name, " ", "-"))
@@ -538,10 +610,6 @@ func projectWorkdir(p Project) (string, error) {
 		}
 		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 	}
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		return "", err
-	}
-	seedProject(path)
 	return path, nil
 }
 

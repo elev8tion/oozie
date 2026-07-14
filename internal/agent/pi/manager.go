@@ -187,6 +187,17 @@ func (m *Manager) Prompt(opts StartOptions, requestID int64, message string) err
 	return p.prompt(requestID, message, opts.Model)
 }
 
+// StopProject terminates the project's pi process if one is running
+// (used when a project is deleted; the on-disk session is untouched).
+func (m *Manager) StopProject(projectID int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p, ok := m.procs[projectID]; ok {
+		p.stop()
+		delete(m.procs, projectID)
+	}
+}
+
 func (m *Manager) Abort(projectID int64) error {
 	if p := m.get(projectID); p != nil {
 		return p.send(map[string]any{"type": "abort"})

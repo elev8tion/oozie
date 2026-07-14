@@ -63,6 +63,24 @@ func (r *Repo) CreateProject(ctx context.Context, name, path string, trusted boo
 	return r.GetProject(ctx, id)
 }
 
+// DeleteProject removes the project row; sessions, requests, messages,
+// prompts, drafts, and jobs cascade with it (store apps are handled by
+// the service first, since their FK is SET NULL).
+func (r *Repo) DeleteProject(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM projects WHERE id=?`, id)
+	return err
+}
+
+// StoreAppIDForProject returns the app published from this project, or 0.
+func (r *Repo) StoreAppIDForProject(ctx context.Context, projectID int64) (int64, error) {
+	var id int64
+	err := r.db.QueryRowContext(ctx, `SELECT id FROM store_apps WHERE project_id=?`, projectID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, err
+}
+
 func (r *Repo) ArchiveProject(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE projects SET archived=1, status='archived', updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err

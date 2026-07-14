@@ -101,6 +101,31 @@ func (h *Handlers) ArchiveProject(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/projects", 303)
 }
 
+// DeleteProject permanently removes a project (and optionally its files).
+func (h *Handlers) DeleteProject(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	_ = r.ParseForm()
+	err := h.service.DeleteProject(r.Context(), id, r.FormValue("delete_files") == "on")
+	if err != nil {
+		if isHTMX(r) {
+			ps, _ := h.service.ListProjects(r.Context(), "", "")
+			h.renderer.HTML(w, 200, "partials/projects/list", render.ViewData{Err: err.Error(), Data: map[string]any{"Projects": ps}})
+			return
+		}
+		h.errorPage(w, r, 422, err.Error())
+		return
+	}
+	if isHTMX(r) {
+		ps, _ := h.service.ListProjects(r.Context(), "", "")
+		h.renderer.HTML(w, 200, "partials/projects/list", render.ViewData{Flash: "Project deleted permanently.", Data: map[string]any{"Projects": ps}})
+		return
+	}
+	http.Redirect(w, r, "/projects", 303)
+}
+
 func (h *Handlers) Agent(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.pathID(w, r, "id")
 	if !ok {

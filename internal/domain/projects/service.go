@@ -382,6 +382,85 @@ func (s *Service) settleImprovement(projectID, requestID int64, status string) {
 	}
 }
 
+// RemixApp forks a published app into a new project — source copied,
+// mutation prompt handed to the agent. The store becomes a gene pool.
+func (s *Service) RemixApp(ctx context.Context, appID int64, mutation string) (Project, error) {
+	mutation = strings.TrimSpace(mutation)
+	if mutation == "" {
+		return Project{}, ErrValidation{"Describe the mutation — what should the remix do differently?"}
+	}
+	app, err := s.repo.GetStoreApp(ctx, appID)
+	if err != nil {
+		return Project{}, err
+	}
+	if app.ProjectID == nil {
+		return Project{}, ErrValidation{"This app has no linked project to remix."}
+	}
+	source, err := s.repo.GetProject(ctx, *app.ProjectID)
+	if err != nil {
+		return Project{}, err
+	}
+	srcDir, err := projectWorkdir(source)
+	if err != nil {
+		return Project{}, ErrValidation{"Source project directory unavailable: " + err.Error()}
+	}
+	remix, err := s.CreateProject(ctx, remixName(app.Name), "", source.Trusted)
+	if err != nil {
+		return Project{}, err
+	}
+	dstDir, err := projectWorkdir(remix)
+	if err != nil {
+		return remix, ErrValidation{"Remix directory unavailable: " + err.Error()}
+	}
+	if err := copyProjectTree(srcDir, dstDir); err != nil {
+		return remix, ErrValidation{"Copied project incompletely: " + err.Error()}
+	}
+	msg := fmt.Sprintf("This project is a remix of %q — its full source was copied here as the starting point.\n\nMutation requested by the user:\n\n%s\n\nApply the mutation: rename the app appropriately (update Package.swift target/product names and any user-visible names), implement the change, keep what still serves the new purpose, delete what doesn't, generate a fresh icon that fits the new identity, and verify with a build and visual review.", app.Name, mutation)
+	if _, err := s.sendAgentMessage(ctx, remix.ID, "build", msg); err != nil {
+		return remix, err
+	}
+	return remix, nil
+}
+
+func remixName(base string) string {
+	return strings.TrimSpace(base) + " Remix"
+}
+
+// copyProjectTree copies a project's source, skipping build products,
+// bundles, VCS internals, and review screenshots.
+func copyProjectTree(src, dst string) error {
+	skip := map[string]bool{".build": true, "dist": true, ".git": true, ".swiftpm": true}
+	return filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil || rel == "." {
+			return err
+		}
+		top := strings.Split(rel, string(filepath.Separator))[0]
+		if skip[top] || filepath.Base(p) == "review.png" {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		dest := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dest, 0o755)
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		body, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dest, body, info.Mode().Perm())
+	})
+}
+
 // AppBySlug resolves a published app from its improve/beacon slug.
 func (s *Service) AppBySlug(ctx context.Context, slug string) (StoreApp, error) {
 	return s.repo.GetStoreAppBySlug(ctx, strings.TrimSpace(slug))

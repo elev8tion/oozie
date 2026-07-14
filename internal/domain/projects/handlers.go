@@ -320,6 +320,23 @@ func (h *Handlers) RemoveStoreApp(w http.ResponseWriter, r *http.Request) {
 	}
 	h.renderer.HTML(w, 200, "partials/store/flash", render.ViewData{Flash: "App removed from your store. Republish the project to bring it back."})
 }
+// RemixApp forks a store app into a new project with a mutation prompt
+// and drops the user onto the new project's agent page.
+func (h *Handlers) RemixApp(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	_ = r.ParseForm()
+	remix, err := h.service.RemixApp(r.Context(), id, r.FormValue("mutation"))
+	if err != nil {
+		app, _ := h.service.GetStoreApp(r.Context(), id)
+		h.page(w, r, app.Name+" · Store", "pages/store/show-content", map[string]any{"App": app, "Error": err.Error()})
+		return
+	}
+	http.Redirect(w, r, "/projects/"+strconv.FormatInt(remix.ID, 10)+"/agent", http.StatusSeeOther)
+}
+
 func (h *Handlers) OpenApp(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.pathID(w, r, "id")
 	if !ok {

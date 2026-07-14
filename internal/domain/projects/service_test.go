@@ -276,3 +276,59 @@ func TestReaperRemovesExpiredApps(t *testing.T) {
 		t.Fatalf("permanent app should survive the reap, got %v", apps)
 	}
 }
+
+// TestRemixCopiesSource proves remixing forks the workdir (minus build
+// products) into a new project. Agent send fails (no pi in tests) but the
+// fork itself must be complete by then.
+func TestRemixCopiesSource(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	srcDir := filepath.Join(t.TempDir(), "orig")
+	p, _ := s.CreateProject(ctx, "Origin", srcDir, true)
+	id, _ := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Origin", Headline: "h", Description: "d"}, "", "origin")
+	writeTestFile(t, filepath.Join(srcDir, "Package.swift"), "// package")
+	writeTestFile(t, filepath.Join(srcDir, "Sources", "main.swift"), "print(1)")
+	writeTestFile(t, filepath.Join(srcDir, ".build", "junk"), "x")
+	writeTestFile(t, filepath.Join(srcDir, "dist", "junk"), "x")
+
+	if _, err := s.RemixApp(ctx, id, ""); err == nil {
+		t.Fatal("empty mutation must be rejected")
+	}
+	remix, err := s.RemixApp(ctx, id, "make it purple")
+	if _, ok := err.(ErrValidation); !ok {
+		t.Fatalf("expected agent-unavailable validation error, got %v", err)
+	}
+	if remix.ID == 0 {
+		t.Fatal("remix project was not created")
+	}
+	home, _ := os.UserHomeDir()
+	dstDir := filepath.Join(home, "Projects", "origin-remix")
+	t.Cleanup(func() {
+		// Only clean what this test created — never a real user directory.
+		if _, err := os.Stat(filepath.Join(dstDir, "Sources", "main.swift")); err == nil {
+			os.RemoveAll(dstDir)
+		}
+	})
+	if _, err := os.Stat(filepath.Join(dstDir, "Package.swift")); err != nil {
+		t.Errorf("source not copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, "Sources", "main.swift")); err != nil {
+		t.Errorf("nested source not copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, ".build")); err == nil {
+		t.Error(".build must not be copied")
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, "dist")); err == nil {
+		t.Error("dist must not be copied")
+	}
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

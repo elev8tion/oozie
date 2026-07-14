@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"oozie/internal/db"
@@ -371,5 +372,65 @@ func TestRecipeRoundTrip(t *testing.T) {
 
 	if _, err := s.ImportRecipe(ctx, `{"kind":"nope"}`); err == nil {
 		t.Fatal("wrong kind must be rejected")
+	}
+}
+
+// TestWishLifecycle covers the fairy loop's plumbing without pi: a wish is
+// added, a build attempt fails cleanly (no agent), and the settle path
+// publishes and marks a wish built when the agent completes.
+func TestWishLifecycle(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	s.SetBuilder(fakeBuilder{})
+
+	if err := s.AddWish(ctx, "   "); err == nil {
+		t.Fatal("blank wish must be rejected")
+	}
+	if err := s.AddWish(ctx, "I wish I had an app that tracks my sourdough starter feedings"); err != nil {
+		t.Fatal(err)
+	}
+	wishes, _ := s.ListWishes(ctx)
+	if len(wishes) != 1 || wishes[0].Status != "pending" {
+		t.Fatalf("wishes = %+v", wishes)
+	}
+
+	// No pi in tests: BuildWish must fail the wish honestly.
+	if err := s.BuildWish(ctx, wishes[0].ID); err == nil {
+		t.Fatal("expected agent-unavailable error")
+	}
+	w, _ := s.repo.GetWish(ctx, wishes[0].ID)
+	if w.Status != "failed" {
+		t.Fatalf("wish status = %q, want failed", w.Status)
+	}
+	// Clean up the wish project's default ~/Projects/<slug> directory.
+	if ps, _ := s.ListProjects(ctx, "", ""); len(ps) > 0 {
+		home, _ := os.UserHomeDir()
+		dir := filepath.Join(home, strings.TrimPrefix(ps[0].ProjectPathDisplay, "~/"))
+		if strings.HasPrefix(dir, filepath.Join(home, "Projects")+string(filepath.Separator)) {
+			os.RemoveAll(dir)
+		}
+	}
+
+	// Simulate the agent finishing: settleWish must publish and grant.
+	p, _ := s.CreateProject(ctx, "Granted", filepath.Join(t.TempDir(), "gr"), true)
+	_ = s.repo.SaveDraft(ctx, PublishDraft{ProjectID: p.ID, AppName: "Granted", Headline: "h", Description: "d"})
+	_ = s.AddWish(ctx, "another wish")
+	wishes, _ = s.ListWishes(ctx)
+	var wid int64
+	for _, x := range wishes {
+		if x.Status == "pending" {
+			wid = x.ID
+		}
+	}
+	_ = s.repo.SetWishBuilding(ctx, wid, p.ID)
+	s.wishByRequest.Store(int64(4242), wid)
+	s.RequestSettled(p.ID, 4242, "completed")
+	s.WaitForJobs()
+	w, _ = s.repo.GetWish(ctx, wid)
+	if w.Status != "built" {
+		t.Fatalf("wish status = %q (%s), want built", w.Status, w.Error)
+	}
+	if apps, _ := s.ListStoreApps(ctx, "", ""); len(apps) != 1 {
+		t.Fatalf("granted wish should have published an app, got %d", len(apps))
 	}
 }

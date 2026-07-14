@@ -67,6 +67,11 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /projects/{id}/publish/draft", h.SaveDraft)
 	mux.HandleFunc("POST /projects/{id}/publish", h.Publish)
 
+	mux.HandleFunc("GET /wishes", h.Wishes)
+	mux.HandleFunc("POST /wishes", h.AddWish)
+	mux.HandleFunc("POST /wishes/{id}/delete", h.DeleteWish)
+	mux.HandleFunc("POST /wishes/{id}/build", h.BuildWish)
+
 	mux.HandleFunc("GET /settings", h.Settings)
 	mux.HandleFunc("POST /settings", h.SaveSettings)
 

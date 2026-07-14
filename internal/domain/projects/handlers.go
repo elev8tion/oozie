@@ -477,13 +477,53 @@ func (h *Handlers) renderJobs(w http.ResponseWriter, r *http.Request, flash, err
 	h.renderer.HTML(w, 200, "partials/publishing/list", render.ViewData{Flash: flash, Err: errMsg, Data: map[string]any{"Jobs": jobs, "Active": jobsActive(jobs)}})
 }
 
+func (h *Handlers) Wishes(w http.ResponseWriter, r *http.Request) {
+	h.wishesPage(w, r, "", "")
+}
+func (h *Handlers) wishesPage(w http.ResponseWriter, r *http.Request, flash, errMsg string) {
+	wishes, _ := h.service.ListWishes(r.Context())
+	s, _ := h.service.GetSettings(r.Context())
+	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Wishes · oozie", Content: "pages/wishes/index-content", Flash: flash, Err: errMsg, Theme: s.Appearance, Style: s.StyleProfile, Data: map[string]any{"Wishes": wishes}})
+}
+func (h *Handlers) AddWish(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	if err := h.service.AddWish(r.Context(), r.FormValue("text")); err != nil {
+		h.wishesPage(w, r, "", err.Error())
+		return
+	}
+	h.wishesPage(w, r, "Wish added — the fairy will find it tonight, or build it now.", "")
+}
+func (h *Handlers) DeleteWish(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	_ = h.service.DeleteWish(r.Context(), id)
+	h.wishesPage(w, r, "Wish deleted.", "")
+}
+func (h *Handlers) BuildWish(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	if err := h.service.BuildWish(r.Context(), id); err != nil {
+		h.wishesPage(w, r, "", err.Error())
+		return
+	}
+	h.wishesPage(w, r, "Granting the wish — the agent is building it now.", "")
+}
+
 func (h *Handlers) Settings(w http.ResponseWriter, r *http.Request) {
 	s, _ := h.service.GetSettings(r.Context())
 	h.page(w, r, "Settings · oozie", "pages/settings/index-content", map[string]any{"Settings": s})
 }
 func (h *Handlers) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
-	s := Settings{Appearance: r.FormValue("appearance"), StyleProfile: r.FormValue("style_profile")}
+	hour, _ := strconv.Atoi(r.FormValue("fairy_hour"))
+	if hour < 0 || hour > 23 {
+		hour = 2
+	}
+	s := Settings{Appearance: r.FormValue("appearance"), StyleProfile: r.FormValue("style_profile"), FairyEnabled: r.FormValue("fairy_enabled") == "on", FairyHour: hour}
 	_ = h.service.SaveSettings(r.Context(), s)
 	h.renderer.HTML(w, 200, "partials/settings/form", render.ViewData{Flash: "Settings saved.", Data: map[string]any{"Settings": s}})
 }

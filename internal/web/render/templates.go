@@ -30,6 +30,7 @@ func New(templatesFS fs.FS, cssStamp string) (*Renderer, error) {
 		"dict":       dict,
 		"include":    renderer.include,
 		"cssVersion": func() string { return cssStamp },
+		"ints":       intRange,
 		"ts":         humanTime,
 		"ago":        humanAgo,
 		"tokens":     humanTokens,
@@ -131,6 +132,15 @@ func humanAgo(v any) string {
 	default:
 		return t.Local().Format("Jan 2, 2006")
 	}
+}
+
+// intRange yields [from, to) for template loops like hour pickers.
+func intRange(from, to int) []int {
+	out := make([]int, 0, to-from)
+	for i := from; i < to; i++ {
+		out = append(out, i)
+	}
+	return out
 }
 
 func dict(values ...any) map[string]any {

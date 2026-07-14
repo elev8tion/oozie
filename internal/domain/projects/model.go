@@ -175,6 +175,19 @@ type PublishingJob struct {
 type Settings struct {
 	Appearance   string
 	StyleProfile string
+	FairyEnabled bool
+	FairyHour    int // local hour (0-23) the night shift starts
+}
+
+// A Wish is an app idea waiting for the nightly build fairy.
+type Wish struct {
+	ID        int64
+	Text      string
+	Status    string // pending|building|built|failed
+	ProjectID *int64
+	Error     string
+	CreatedAt time.Time
+	BuiltAt   *time.Time
 }
 
 type Dashboard struct {

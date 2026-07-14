@@ -15,6 +15,13 @@
     </select></label>
     <p class="muted">Runs as a solo local workspace — no sign-in, no accounts.</p>
   </fieldset>
+  <fieldset><legend>Nightly build fairy</legend>
+    <label class="check"><input type="checkbox" name="fairy_enabled"{{if $s.FairyEnabled}} checked{{end}}> Grant pending wishes automatically each night</label>
+    <label>Night shift starts at<select name="fairy_hour">
+      {{range $h := ints 0 24}}<option value="{{$h}}"{{if eq $s.FairyHour $h}} selected{{end}}>{{printf "%02d:00" $h}}</option>{{end}}
+    </select></label>
+    <p class="muted">Up to three wishes per night become trusted projects, built and published while you sleep. oozie (and your Mac) must be running.</p>
+  </fieldset>
   <button class="button primary">Save settings</button>
 </form>
 {{end}}

@@ -35,6 +35,11 @@ type Service struct {
 	builder build.AppBuilder
 	jobs    sync.WaitGroup
 	baseURL string // oozie's own address, baked into beacon shims and improve links
+
+	// wishByRequest maps in-flight agent requests to the wish that spawned
+	// them (in-memory: a restart mid-build fails the wish honestly at the
+	// next startup sweep).
+	wishByRequest sync.Map
 }
 
 func NewService(repo *Repo) *Service {
@@ -59,6 +64,7 @@ func (s *Service) WaitForJobs() { s.jobs.Wait() }
 // self-destructs disposable apps. Loops exit when ctx is cancelled.
 func (s *Service) StartBackground(ctx context.Context) {
 	go s.reapLoop(ctx)
+	go s.fairyLoop(ctx)
 }
 
 func (s *Service) reapLoop(ctx context.Context) {
@@ -103,6 +109,9 @@ func (s *Service) RecoverOrphanedJobs(ctx context.Context) {
 		log.Printf("sweep orphaned jobs: %v", err)
 	} else if n > 0 {
 		log.Printf("marked %d orphaned publishing job(s) failed", n)
+	}
+	if err := s.repo.SweepStaleWishes(ctx); err != nil {
+		log.Printf("sweep stale wishes: %v", err)
 	}
 }
 
@@ -342,6 +351,7 @@ func (s *Service) RequestSettled(projectID, requestID int64, status string) {
 		log.Printf("settle request %d (project %d): %v", requestID, projectID, err)
 	}
 	s.settleImprovement(projectID, requestID, status)
+	s.settleWish(projectID, requestID, status)
 }
 
 // settleImprovement closes the fix-me loop: when an agent request that

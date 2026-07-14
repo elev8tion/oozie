@@ -520,10 +520,83 @@ func (r *Repo) InstalledApps(ctx context.Context) ([]StoreApp, error) {
 
 func (r *Repo) GetSettings(ctx context.Context) (Settings, error) {
 	var s Settings
-	err := r.db.QueryRowContext(ctx, `SELECT appearance,style_profile FROM user_settings WHERE user_id=1`).Scan(&s.Appearance, &s.StyleProfile)
+	err := r.db.QueryRowContext(ctx, `SELECT appearance,style_profile,fairy_enabled,fairy_hour FROM user_settings WHERE user_id=1`).Scan(&s.Appearance, &s.StyleProfile, &s.FairyEnabled, &s.FairyHour)
 	return s, err
 }
 func (r *Repo) SaveSettings(ctx context.Context, s Settings) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE user_settings SET appearance=?,style_profile=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=1`, s.Appearance, s.StyleProfile)
+	_, err := r.db.ExecContext(ctx, `UPDATE user_settings SET appearance=?,style_profile=?,fairy_enabled=?,fairy_hour=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=1`, s.Appearance, s.StyleProfile, s.FairyEnabled, s.FairyHour)
+	return err
+}
+
+func (r *Repo) AddWish(ctx context.Context, text string) error {
+	_, err := r.db.ExecContext(ctx, `INSERT INTO wishes (text) VALUES (?)`, text)
+	return err
+}
+func (r *Repo) DeleteWish(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM wishes WHERE id=?`, id)
+	return err
+}
+func (r *Repo) GetWish(ctx context.Context, id int64) (Wish, error) {
+	return scanWish(r.db.QueryRowContext(ctx, `SELECT id,text,status,project_id,error,created_at,built_at FROM wishes WHERE id=?`, id))
+}
+func (r *Repo) ListWishes(ctx context.Context) ([]Wish, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id,text,status,project_id,error,created_at,built_at FROM wishes ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'building' THEN 1 ELSE 2 END, id DESC LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Wish
+	for rows.Next() {
+		w, err := scanWish(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+func scanWish(row rowScanner) (Wish, error) {
+	var w Wish
+	var pid sql.NullInt64
+	var built sql.NullTime
+	if err := row.Scan(&w.ID, &w.Text, &w.Status, &pid, &w.Error, &w.CreatedAt, &built); err != nil {
+		return Wish{}, err
+	}
+	if pid.Valid {
+		w.ProjectID = &pid.Int64
+	}
+	if built.Valid {
+		w.BuiltAt = &built.Time
+	}
+	return w, nil
+}
+func (r *Repo) PendingWishes(ctx context.Context, limit int) ([]Wish, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id,text,status,project_id,error,created_at,built_at FROM wishes WHERE status='pending' ORDER BY id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Wish
+	for rows.Next() {
+		w, err := scanWish(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+func (r *Repo) SetWishBuilding(ctx context.Context, id, projectID int64) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE wishes SET status='building', project_id=? WHERE id=?`, projectID, id)
+	return err
+}
+func (r *Repo) SettleWish(ctx context.Context, id int64, status, errMsg string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE wishes SET status=?, error=?, built_at=CURRENT_TIMESTAMP WHERE id=?`, status, errMsg, id)
+	return err
+}
+
+// SweepStaleWishes fails wishes left 'building' by a dead process.
+func (r *Repo) SweepStaleWishes(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE wishes SET status='failed', error='oozie quit while this wish was building — set it back to pending or build it now' WHERE status='building'`)
 	return err
 }

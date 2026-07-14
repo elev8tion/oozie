@@ -60,6 +60,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /store/apps/{id}/surgery/screenshot", h.SurgeryScreenshot)
 	mux.HandleFunc("POST /store/apps/{id}/surgery/capture", h.SurgeryCapture)
 	mux.HandleFunc("POST /store/apps/{id}/surgery", h.SurgerySubmit)
+	mux.HandleFunc("GET /recipes", h.ImportRecipePage)
 	mux.HandleFunc("GET /recipes/import", h.ImportRecipePage)
 	mux.HandleFunc("POST /recipes/import", h.ImportRecipe)
 	mux.HandleFunc("GET /installed-apps", h.InstalledApps)

@@ -346,8 +346,11 @@ func (h *Handlers) ExportRecipe(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
+// ImportRecipePage is the Recipes hub: import a recipe, and export any
+// published app as one.
 func (h *Handlers) ImportRecipePage(w http.ResponseWriter, r *http.Request) {
-	h.page(w, r, "Import Recipe · oozie", "pages/recipes/import-content", nil)
+	apps, _ := h.service.ListStoreApps(r.Context(), "", "")
+	h.page(w, r, "Recipes · oozie", "pages/recipes/import-content", map[string]any{"Apps": apps})
 }
 
 func (h *Handlers) ImportRecipe(w http.ResponseWriter, r *http.Request) {
@@ -362,7 +365,8 @@ func (h *Handlers) ImportRecipe(w http.ResponseWriter, r *http.Request) {
 	}
 	project, err := h.service.ImportRecipe(r.Context(), raw)
 	if err != nil {
-		h.page(w, r, "Import Recipe · oozie", "pages/recipes/import-content", map[string]any{"Error": err.Error(), "Recipe": raw})
+		apps, _ := h.service.ListStoreApps(r.Context(), "", "")
+		h.page(w, r, "Recipes · oozie", "pages/recipes/import-content", map[string]any{"Error": err.Error(), "Recipe": raw, "Apps": apps})
 		return
 	}
 	http.Redirect(w, r, "/projects/"+strconv.FormatInt(project.ID, 10)+"/agent", http.StatusSeeOther)

@@ -692,7 +692,7 @@ func (s *Service) SaveFeedback(ctx context.Context, projectID int64, typ, reason
 func (s *Service) GetDraft(ctx context.Context, projectID int64) (PublishDraft, error) {
 	d, err := s.repo.GetDraft(ctx, projectID)
 	if err != nil {
-		return s.draftWithDefaults(ctx, PublishDraft{ProjectID: projectID}), nil
+		return s.draftWithDefaults(ctx, PublishDraft{ProjectID: projectID, AutoInstall: true}), nil
 	}
 	return d, err
 }
@@ -746,7 +746,7 @@ func (s *Service) publish(ctx context.Context, projectID int64, after func(store
 	if errors.Is(err, sql.ErrNoRows) {
 		// No draft yet — publish anyway with sensible defaults so one
 		// click always works; the listing can be polished afterwards.
-		draft = s.draftWithDefaults(ctx, PublishDraft{ProjectID: projectID})
+		draft = s.draftWithDefaults(ctx, PublishDraft{ProjectID: projectID, AutoInstall: true})
 		if err := s.SaveDraft(ctx, draft); err != nil {
 			return err
 		}
@@ -794,6 +794,13 @@ func (s *Service) runPublishJob(jobID, projectID int64, draft PublishDraft, work
 		return
 	}
 	_ = s.repo.FinishJob(ctx, jobID, "succeeded", "", &appID)
+	// One-click philosophy: a successful publish ends with a usable app in
+	// ~/Applications unless the draft opted out.
+	if draft.AutoInstall {
+		if err := s.InstallApp(ctx, appID); err != nil {
+			log.Printf("auto-install %q after publish: %v", draft.AppName, err)
+		}
+	}
 	if after != nil {
 		after(appID, nil)
 	}
@@ -888,7 +895,14 @@ func (s *Service) RemoveStoreApp(ctx context.Context, id int64) error {
 	return s.repo.DeleteStoreApp(ctx, id)
 }
 
+// applicationsDirOverride redirects installs (tests point it at a temp
+// dir so auto-install never touches the real ~/Applications).
+var applicationsDirOverride string
+
 func installedAppPath(app StoreApp) (string, error) {
+	if applicationsDirOverride != "" {
+		return filepath.Join(applicationsDirOverride, filepath.Base(app.ArtifactPath)), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

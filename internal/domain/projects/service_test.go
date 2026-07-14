@@ -37,7 +37,8 @@ func newTestService(t *testing.T) *Service {
 		t.Fatal(err)
 	}
 	tasteDirOverride = t.TempDir()
-	t.Cleanup(func() { tasteDirOverride = "" })
+	applicationsDirOverride = t.TempDir()
+	t.Cleanup(func() { tasteDirOverride = ""; applicationsDirOverride = "" })
 	return NewService(NewRepo(database))
 }
 
@@ -569,5 +570,40 @@ func TestSafeDeleteGuards(t *testing.T) {
 	// Deleting a dir that's already gone is fine.
 	if err := safeDeleteProjectDir(ok); err != nil {
 		t.Errorf("guard errored on missing dir: %v", err)
+	}
+}
+
+// TestAutoInstallOnPublish: with no saved draft, a publish auto-creates a
+// default draft with auto-install on — the app lands installed. An
+// explicit draft with auto-install off stays uninstalled.
+func TestAutoInstallOnPublish(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	s.SetBuilder(fakeBuilder{})
+	p, _ := s.CreateProject(ctx, "Clicky", filepath.Join(t.TempDir(), "c"), true)
+	if err := s.Publish(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.WaitForJobs()
+	app, err := s.AppBySlug(ctx, "clicky")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !app.Installed {
+		t.Fatal("publish with default draft should auto-install")
+	}
+	if _, err := os.Stat(filepath.Join(applicationsDirOverride, "Clicky.app")); err != nil {
+		t.Fatalf("bundle not copied to Applications dir: %v", err)
+	}
+
+	p2, _ := s.CreateProject(ctx, "Shy", filepath.Join(t.TempDir(), "s"), true)
+	_ = s.SaveDraft(ctx, PublishDraft{ProjectID: p2.ID, AppName: "Shy", Headline: "h", Description: "d", AutoInstall: false})
+	if err := s.Publish(ctx, p2.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.WaitForJobs()
+	app2, _ := s.AppBySlug(ctx, "shy")
+	if app2.Installed {
+		t.Fatal("auto-install off must not install")
 	}
 }

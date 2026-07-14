@@ -95,7 +95,8 @@ type PublishDraft struct {
 	PublishTarget      string
 	Visibility         string
 	ScreenshotManifest string
-	ExpiresDays        int // 0 = permanent; otherwise the app self-destructs after N days
+	ExpiresDays        int  // 0 = permanent; otherwise the app self-destructs after N days
+	AutoInstall        bool // install to ~/Applications when the build succeeds
 	OrganizationID     *int64
 	SavedAt            time.Time
 }

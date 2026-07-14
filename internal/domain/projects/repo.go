@@ -285,14 +285,14 @@ func (r *Repo) SaveFeedback(ctx context.Context, projectID int64, typ, reason, e
 func (r *Repo) GetDraft(ctx context.Context, projectID int64) (PublishDraft, error) {
 	var d PublishDraft
 	var org sql.NullInt64
-	err := r.db.QueryRowContext(ctx, `SELECT project_id,app_name,headline,description,changelog,publish_target,visibility,screenshot_manifest,expires_days,organization_id,saved_at FROM publish_drafts WHERE project_id=?`, projectID).Scan(&d.ProjectID, &d.AppName, &d.Headline, &d.Description, &d.Changelog, &d.PublishTarget, &d.Visibility, &d.ScreenshotManifest, &d.ExpiresDays, &org, &d.SavedAt)
+	err := r.db.QueryRowContext(ctx, `SELECT project_id,app_name,headline,description,changelog,publish_target,visibility,screenshot_manifest,expires_days,auto_install,organization_id,saved_at FROM publish_drafts WHERE project_id=?`, projectID).Scan(&d.ProjectID, &d.AppName, &d.Headline, &d.Description, &d.Changelog, &d.PublishTarget, &d.Visibility, &d.ScreenshotManifest, &d.ExpiresDays, &d.AutoInstall, &org, &d.SavedAt)
 	if org.Valid {
 		d.OrganizationID = &org.Int64
 	}
 	return d, err
 }
 func (r *Repo) SaveDraft(ctx context.Context, d PublishDraft) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO publish_drafts (project_id,app_name,headline,description,changelog,publish_target,visibility,screenshot_manifest,expires_days,organization_id,saved_at) VALUES (?,?,?,?,?,?,?,?,?,1,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET app_name=excluded.app_name,headline=excluded.headline,description=excluded.description,changelog=excluded.changelog,publish_target=excluded.publish_target,visibility=excluded.visibility,screenshot_manifest=excluded.screenshot_manifest,expires_days=excluded.expires_days,saved_at=CURRENT_TIMESTAMP`, d.ProjectID, d.AppName, d.Headline, d.Description, d.Changelog, d.PublishTarget, d.Visibility, d.ScreenshotManifest, d.ExpiresDays)
+	_, err := r.db.ExecContext(ctx, `INSERT INTO publish_drafts (project_id,app_name,headline,description,changelog,publish_target,visibility,screenshot_manifest,expires_days,auto_install,organization_id,saved_at) VALUES (?,?,?,?,?,?,?,?,?,?,1,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET app_name=excluded.app_name,headline=excluded.headline,description=excluded.description,changelog=excluded.changelog,publish_target=excluded.publish_target,visibility=excluded.visibility,screenshot_manifest=excluded.screenshot_manifest,expires_days=excluded.expires_days,auto_install=excluded.auto_install,saved_at=CURRENT_TIMESTAMP`, d.ProjectID, d.AppName, d.Headline, d.Description, d.Changelog, d.PublishTarget, d.Visibility, d.ScreenshotManifest, d.ExpiresDays, d.AutoInstall)
 	return err
 }
 func (r *Repo) CreateJob(ctx context.Context, projectID int64) (int64, error) {

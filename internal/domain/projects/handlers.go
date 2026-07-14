@@ -502,7 +502,7 @@ func draftFromForm(projectID int64, r *http.Request) PublishDraft {
 	if days < 0 {
 		days = 0
 	}
-	return PublishDraft{ProjectID: projectID, AppName: r.FormValue("app_name"), Headline: r.FormValue("headline"), Description: r.FormValue("description"), Changelog: r.FormValue("changelog"), PublishTarget: r.FormValue("publish_target"), Visibility: r.FormValue("visibility"), ScreenshotManifest: r.FormValue("screenshot_manifest"), ExpiresDays: days}
+	return PublishDraft{ProjectID: projectID, AppName: r.FormValue("app_name"), Headline: r.FormValue("headline"), Description: r.FormValue("description"), Changelog: r.FormValue("changelog"), PublishTarget: r.FormValue("publish_target"), Visibility: r.FormValue("visibility"), ScreenshotManifest: r.FormValue("screenshot_manifest"), ExpiresDays: days, AutoInstall: r.FormValue("auto_install") == "on"}
 }
 
 func (h *Handlers) renderJobs(w http.ResponseWriter, r *http.Request, flash, errMsg string) {

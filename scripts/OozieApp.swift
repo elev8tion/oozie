@@ -32,8 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
 		proc.executableURL = URL(fileURLWithPath: Bundle.main.bundlePath + "/Contents/MacOS/oozie-server")
 		var env = ProcessInfo.processInfo.environment
 		env["ADDR"] = "127.0.0.1:\(port)"
+		env["OOZIE_PARENT_WATCH"] = "1"
 		env.removeValue(forKey: "OOZIE_OPEN_BROWSER")
 		proc.environment = env
+		// The server watches this pipe: if we die (even force-quit), the
+		// pipe closes and the server shuts itself down.
+		proc.standardInput = Pipe()
 		do {
 			try proc.run()
 			server = proc

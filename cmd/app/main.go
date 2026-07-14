@@ -59,6 +59,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Under the .app shell, stdin is a pipe held by the parent process.
+	// EOF means the parent died (even via force-quit), so shut down rather
+	// than run orphaned.
+	if os.Getenv("OOZIE_PARENT_WATCH") == "1" {
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		}()
+	}
+
 	go func() {
 		log.Printf("oozie listening on http://%s (database: %s)", cfg.Addr, cfg.DatabasePath)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

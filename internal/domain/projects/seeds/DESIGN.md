@@ -41,8 +41,11 @@ Interface Guidelines. These rules are mandatory unless the user overrides them.
 
 ## Accessibility & finish
 - Every icon-only button gets an accessibility label.
-- Ship an app icon: generate a simple, tasteful 1024×1024 `icon.png` at the
-  project root (flat shape, one or two colors, no text) so publishing embeds it.
+- Ship an app icon: generate one on-device with Apple Intelligence —
+  `sh Tools/generate-icon.sh "flat minimal app icon of <subject> on a rounded
+  square <color> background, no text" icon.png` — then read the PNG to check
+  it suits the app. Fall back to drawing a simple AppKit icon if generation
+  is unavailable.
 - Before declaring the work done: build it, then walk each screen and fix
   anything misaligned, cramped, default-looking, or unlabeled.
 

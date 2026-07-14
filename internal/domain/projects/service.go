@@ -346,7 +346,7 @@ Producing Mac apps (oozie's publish pipeline):
 - When the user asks for an app, scaffold a Swift package at the project root: a Package.swift with a single executable target, macOS platform .macOS(.v13) or later, sources under Sources/.
 - For GUI apps, use SwiftUI with an explicit AppDelegate-free entry (@main struct conforming to App) and call NSApplication.shared.setActivationPolicy(.regular) plus NSApp.activate(ignoringOtherApps: true) at launch so the window appears when run from a bundle.
 - Verify with 'swift build' before declaring the work done.
-- Place a 1024x1024 icon.png (or icon.icns) at the project root; oozie converts it into the app icon when publishing.
+- Every app gets an icon before it's done. Generate one on-device with Apple Intelligence: sh Tools/generate-icon.sh "flat minimal app icon of <subject> on a rounded square <color> background, no text" icon.png — then read icon.png to confirm it fits the app. If generation is unavailable (Apple Intelligence disabled), draw a simple icon.png with AppKit instead (rounded rect, gradient, bold SF-Symbol-like glyph). oozie converts icon.png at the project root into the .app icon when publishing.
 
 Design quality (non-negotiable):
 - The project root contains DESIGN.md — read it before any UI work and follow it. It is the visual/UX standard for every app built here: native macOS feel, HIG-aligned layout on an 8pt grid, semantic system colors with full dark-mode support, system text styles, SF Symbols (never emoji as icons), designed empty/loading/error states, keyboard shortcuts, confirmation for destructive actions, and accessibility labels.

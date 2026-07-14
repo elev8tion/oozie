@@ -14,13 +14,15 @@ func Open(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
-	database, err := sql.Open("sqlite", path)
+	// Pragmas ride the DSN so every pooled connection gets them: WAL lets
+	// readers coexist with the background writers (publish jobs, pi event
+	// sinks, the beacon endpoint, the fairy), busy_timeout absorbs writer
+	// contention instead of surfacing SQLITE_BUSY, and foreign_keys is
+	// per-connection in SQLite so setting it once on one connection is not
+	// enough.
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)"
+	database, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, err
-	}
-
-	if _, err := database.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
-		database.Close()
 		return nil, err
 	}
 

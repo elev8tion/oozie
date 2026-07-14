@@ -284,6 +284,16 @@ func (r *Repo) CreateJob(ctx context.Context, projectID int64) (int64, error) {
 	}
 	return res.LastInsertId()
 }
+// SweepOrphanedJobs fails any job left queued/running by a previous
+// process: their goroutines died with it, so the rows can never settle.
+func (r *Repo) SweepOrphanedJobs(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `UPDATE publishing_jobs SET status='failed', error_message='oozie quit while this build was running — publish again', updated_at=CURRENT_TIMESTAMP WHERE status IN ('queued','running')`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (r *Repo) SetJobRunning(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE publishing_jobs SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err

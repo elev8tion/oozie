@@ -45,6 +45,16 @@ func (s *Service) SetBuilder(b build.AppBuilder) { s.builder = b }
 // WaitForJobs blocks until all in-flight publishing jobs settle.
 func (s *Service) WaitForJobs() { s.jobs.Wait() }
 
+// RecoverOrphanedJobs fails jobs stranded by a previous process. Run once
+// at startup, before the server accepts requests.
+func (s *Service) RecoverOrphanedJobs(ctx context.Context) {
+	if n, err := s.repo.SweepOrphanedJobs(ctx); err != nil {
+		log.Printf("sweep orphaned jobs: %v", err)
+	} else if n > 0 {
+		log.Printf("marked %d orphaned publishing job(s) failed", n)
+	}
+}
+
 // SetAgent wires the pi RPC manager after construction (the manager's
 // event sink is this service, so the two reference each other).
 func (s *Service) SetAgent(agent *pi.Manager, catalog pi.Catalog) {

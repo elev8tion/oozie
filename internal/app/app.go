@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"io/fs"
 
@@ -24,6 +25,7 @@ func New(config Config, database *sql.DB, renderer *render.Renderer, static fs.F
 	catalog := pi.LoadCatalog()
 	agent := pi.NewManager(catalog, service)
 	service.SetAgent(agent, catalog)
+	service.RecoverOrphanedJobs(context.Background())
 	return &App{config: config, database: database, renderer: renderer, static: static, agent: agent, service: service}
 }
 

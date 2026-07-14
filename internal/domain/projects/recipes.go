@@ -62,7 +62,13 @@ func (s *Service) ExportRecipe(ctx context.Context, appID int64) (Recipe, error)
 func (s *Service) ImportRecipe(ctx context.Context, raw string) (Project, error) {
 	var rec Recipe
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &rec); err != nil {
-		return Project{}, ErrValidation{"That doesn't parse as a recipe: " + err.Error()}
+		msg := "That doesn't parse as a recipe: " + err.Error()
+		// The classic corruption: an editor auto-replaced straight quotes
+		// with curly ones while the user tweaked a field by hand.
+		if strings.ContainsAny(raw, "“”") {
+			msg += ` — the text contains curly “smart quotes”; your editor likely auto-replaced a straight " while editing. Fix those and retry.`
+		}
+		return Project{}, ErrValidation{msg}
 	}
 	if rec.Kind != recipeKind {
 		return Project{}, ErrValidation{"Unsupported recipe kind — expected " + recipeKind + "."}

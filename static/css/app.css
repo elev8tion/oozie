@@ -143,3 +143,7 @@ td.row-actions{flex-wrap:nowrap;justify-content:flex-end;white-space:nowrap;gap:
 :root[data-style="blueprint"]{--accent:#3b82f6}
 :root[data-style="warm"]{--accent:#c2703d}
 :root[data-theme="dark"][data-style="warm"]{--accent:#e8a06a;--accent-contrast:#241203}
+
+/* Streaming assistant message: subtle pulse while text is arriving. */
+@keyframes oozie-pulse{0%,100%{opacity:.45}50%{opacity:1}}
+.message .status.loading,.working{animation:oozie-pulse 1.2s ease-in-out infinite}

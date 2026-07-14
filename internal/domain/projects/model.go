@@ -1,6 +1,10 @@
 package projects
 
-import "time"
+import (
+	"time"
+
+	"oozie/internal/agent/pi"
+)
 
 type User struct {
 	ID          int64
@@ -151,6 +155,7 @@ type AgentPage struct {
 	Models     []ModelOption
 	Model      string
 	Streaming  bool
+	Stats      *pi.SessionStats
 }
 
 type ErrValidation struct{ Message string }

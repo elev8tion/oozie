@@ -31,6 +31,7 @@ func New(templatesFS fs.FS, cssStamp string) (*Renderer, error) {
 		"include":    renderer.include,
 		"cssVersion": func() string { return cssStamp },
 		"ts":         humanTime,
+		"tokens":     humanTokens,
 	})
 	for _, pattern := range patterns {
 		matches, err := fs.Glob(templatesFS, pattern)
@@ -79,6 +80,17 @@ func (r *Renderer) include(name string, data any) (template.HTML, error) {
 		return "", err
 	}
 	return template.HTML(buf.String()), nil
+}
+
+// humanTokens shortens token counts: 950 → "950", 12_340 → "12.3k".
+func humanTokens(n int64) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	if n < 1_000_000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%.2fM", float64(n)/1_000_000)
 }
 
 // humanTime renders timestamps in a compact local format instead of Go's

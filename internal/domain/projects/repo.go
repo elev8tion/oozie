@@ -137,7 +137,35 @@ func (r *Repo) InsertMessage(ctx context.Context, requestID int64, role, status,
 	return err
 }
 
+// UpsertPartialAssistant keeps a single 'loading' assistant row per request
+// updated with the streaming text-so-far.
+func (r *Repo) UpsertPartialAssistant(ctx context.Context, requestID int64, content string) error {
+	res, err := r.db.ExecContext(ctx, `UPDATE agent_messages SET content=? WHERE request_id=? AND role='assistant' AND status='loading'`, content, requestID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	return r.InsertMessage(ctx, requestID, "assistant", "loading", content)
+}
+
+// FinalizeAssistant replaces the streaming 'loading' row with the final
+// message text, or inserts a completed row if streaming never produced one.
+func (r *Repo) FinalizeAssistant(ctx context.Context, requestID int64, content string) error {
+	res, err := r.db.ExecContext(ctx, `UPDATE agent_messages SET content=?, status='completed' WHERE request_id=? AND role='assistant' AND status='loading'`, content, requestID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	return r.InsertMessage(ctx, requestID, "assistant", "completed", content)
+}
+
 func (r *Repo) CompleteRequest(ctx context.Context, id int64, status string) error {
+	// Settle any leftover streaming rows so nothing stays 'loading' forever.
+	_, _ = r.db.ExecContext(ctx, `UPDATE agent_messages SET status='completed' WHERE request_id=? AND status='loading'`, id)
 	_, err := r.db.ExecContext(ctx, `UPDATE agent_requests SET status=?, updated_at=CURRENT_TIMESTAMP, completed_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('streaming','waiting')`, status, id)
 	return err
 }

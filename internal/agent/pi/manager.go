@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // approvalExtension gates mutating tool calls behind a confirm dialog for
@@ -25,12 +26,30 @@ var approvalExtension []byte
 // from the process reader goroutine, never concurrently for one project.
 type Sink interface {
 	AssistantMessage(projectID, requestID int64, content string)
+	// AssistantPartial delivers the text-so-far of a streaming assistant
+	// message (throttled); the final AssistantMessage supersedes it.
+	AssistantPartial(projectID, requestID int64, content string)
 	ToolMessage(projectID, requestID int64, content string)
 	RequestSettled(projectID, requestID int64, status string)
 	Question(projectID, requestID int64, rpcID, prompt, optionsJSON string)
 	Permission(projectID, requestID int64, rpcID, name, reason string)
 	AgentError(projectID, requestID int64, message string)
 }
+
+// SessionStats mirrors pi's get_session_stats response data.
+type SessionStats struct {
+	InputTokens    int64
+	OutputTokens   int64
+	TotalTokens    int64
+	Cost           float64
+	ContextPercent float64
+	ContextWindow  int64
+}
+
+// idleTimeout is how long a non-streaming pi process may sit unused before
+// the reaper stops it. Sessions persist on disk (--session-id), so the next
+// prompt transparently restarts the process with full context.
+const idleTimeout = 30 * time.Minute
 
 // Manager owns one pi RPC subprocess per project.
 type Manager struct {
@@ -40,6 +59,7 @@ type Manager struct {
 	catalog     Catalog
 	binary      string
 	approvalExt string // path to the materialized approval extension
+	stop        chan struct{}
 }
 
 func NewManager(catalog Catalog, sink Sink) *Manager {
@@ -47,7 +67,46 @@ func NewManager(catalog Catalog, sink Sink) *Manager {
 	if binary == "" {
 		binary = "pi"
 	}
-	return &Manager{procs: map[int64]*proc{}, sink: sink, catalog: catalog, binary: binary, approvalExt: materializeApprovalExtension()}
+	m := &Manager{procs: map[int64]*proc{}, sink: sink, catalog: catalog, binary: binary, approvalExt: materializeApprovalExtension(), stop: make(chan struct{})}
+	go m.reapLoop()
+	return m
+}
+
+// reapLoop stops pi processes that have been idle past idleTimeout.
+func (m *Manager) reapLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case <-ticker.C:
+		}
+		m.mu.Lock()
+		for id, p := range m.procs {
+			p.mu.Lock()
+			idle := !p.streaming && time.Since(p.lastActive) > idleTimeout
+			p.mu.Unlock()
+			if idle {
+				log.Printf("pi project %d: stopping idle process (session persists)", id)
+				p.stop()
+				delete(m.procs, id)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
+// Stats returns the last known session stats for the project's agent, or
+// nil if none have been collected yet (or the process isn't running).
+func (m *Manager) Stats(projectID int64) *SessionStats {
+	p := m.get(projectID)
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stats
 }
 
 // materializeApprovalExtension writes the embedded approval extension to a
@@ -131,6 +190,7 @@ func (m *Manager) Streaming(projectID int64) bool {
 }
 
 func (m *Manager) Shutdown() {
+	close(m.stop)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, p := range m.procs {
@@ -195,12 +255,13 @@ func (m *Manager) ensure(opts StartOptions) (*proc, error) {
 	}
 
 	p := &proc{
-		projectID: opts.ProjectID,
-		cmd:       cmd,
-		stdin:     stdin,
-		sink:      m.sink,
-		model:     opts.Model,
-		done:      make(chan struct{}),
+		projectID:  opts.ProjectID,
+		cmd:        cmd,
+		stdin:      stdin,
+		sink:       m.sink,
+		model:      opts.Model,
+		done:       make(chan struct{}),
+		lastActive: time.Now(),
 	}
 	m.procs[opts.ProjectID] = p
 	go p.readLoop(stdout)
@@ -220,6 +281,10 @@ type proc struct {
 	currentRequestID int64
 	done             chan struct{}
 	exited           bool
+	lastActive       time.Time
+	lastPartialFlush time.Time
+	lastPartialLen   int
+	stats            *SessionStats
 }
 
 func (p *proc) alive() bool {
@@ -283,6 +348,8 @@ func (p *proc) prompt(requestID int64, message, model string) error {
 	}
 	p.mu.Lock()
 	p.currentRequestID = requestID
+	p.lastActive = time.Now()
+	p.lastPartialLen = 0
 	busy := p.streaming
 	p.mu.Unlock()
 
@@ -295,10 +362,11 @@ func (p *proc) prompt(requestID int64, message, model string) error {
 
 // event is a loosely-typed view over pi's RPC event stream.
 type event struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
-	Success *bool  `json:"success"`
-	Error   string `json:"error"`
+	Type    string          `json:"type"`
+	Command string          `json:"command"`
+	Success *bool           `json:"success"`
+	Error   string          `json:"error"`
+	Data    json.RawMessage `json:"data"`
 
 	// Message is an object for message_* events but a plain string for
 	// extension_ui_request, so it stays raw and is decoded per event type.
@@ -352,6 +420,7 @@ func (p *proc) handleLine(line string) {
 
 	p.mu.Lock()
 	requestID := p.currentRequestID
+	p.lastActive = time.Now()
 	p.mu.Unlock()
 
 	switch ev.Type {
@@ -359,6 +428,9 @@ func (p *proc) handleLine(line string) {
 		p.mu.Lock()
 		p.streaming = true
 		p.mu.Unlock()
+
+	case "message_update":
+		p.handlePartial(ev, requestID)
 
 	case "message_end":
 		var msg struct {
@@ -392,6 +464,7 @@ func (p *proc) handleLine(line string) {
 		p.mu.Lock()
 		p.streaming = false
 		p.currentRequestID = 0
+		p.lastPartialLen = 0
 		status := "completed"
 		if p.hadError {
 			status = "failed"
@@ -401,6 +474,8 @@ func (p *proc) handleLine(line string) {
 		if requestID != 0 {
 			p.sink.RequestSettled(p.projectID, requestID, status)
 		}
+		// Refresh session stats after each run; the response is handled below.
+		_ = p.send(map[string]any{"type": "get_session_stats"})
 
 	case "extension_ui_request":
 		p.handleUIRequest(line, requestID)
@@ -413,7 +488,68 @@ func (p *proc) handleLine(line string) {
 			p.currentRequestID = 0
 			p.mu.Unlock()
 		}
+		if ev.Command == "get_session_stats" && ev.Success != nil && *ev.Success {
+			p.handleStats(ev.Data)
+		}
 	}
+}
+
+// handlePartial persists the text-so-far of a streaming assistant message,
+// throttled so rapid token deltas don't hammer the database.
+func (p *proc) handlePartial(ev event, requestID int64) {
+	if requestID == 0 || len(ev.Message) == 0 {
+		return
+	}
+	var msg struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(ev.Message, &msg) != nil || msg.Role != "assistant" {
+		return
+	}
+	text := extractText(msg.Content)
+	if text == "" {
+		return
+	}
+	p.mu.Lock()
+	grown := len(text) > p.lastPartialLen
+	due := time.Since(p.lastPartialFlush) >= 400*time.Millisecond
+	if grown && due {
+		p.lastPartialLen = len(text)
+		p.lastPartialFlush = time.Now()
+	}
+	p.mu.Unlock()
+	if grown && due {
+		p.sink.AssistantPartial(p.projectID, requestID, text)
+	}
+}
+
+func (p *proc) handleStats(data json.RawMessage) {
+	var d struct {
+		Tokens struct {
+			Input  int64 `json:"input"`
+			Output int64 `json:"output"`
+			Total  int64 `json:"total"`
+		} `json:"tokens"`
+		Cost         float64 `json:"cost"`
+		ContextUsage struct {
+			ContextWindow int64   `json:"contextWindow"`
+			Percent       float64 `json:"percent"`
+		} `json:"contextUsage"`
+	}
+	if json.Unmarshal(data, &d) != nil {
+		return
+	}
+	p.mu.Lock()
+	p.stats = &SessionStats{
+		InputTokens:    d.Tokens.Input,
+		OutputTokens:   d.Tokens.Output,
+		TotalTokens:    d.Tokens.Total,
+		Cost:           d.Cost,
+		ContextPercent: d.ContextUsage.Percent,
+		ContextWindow:  d.ContextUsage.ContextWindow,
+	}
+	p.mu.Unlock()
 }
 
 func (p *proc) handleUIRequest(line string, requestID int64) {

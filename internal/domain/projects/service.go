@@ -89,7 +89,11 @@ func (s *Service) AgentPage(ctx context.Context, projectID int64) (AgentPage, er
 		model = s.catalog.DefaultModel
 	}
 	streaming := len(reqs) > 0 && (reqs[0].Status == "streaming" || reqs[0].Status == "waiting")
-	return AgentPage{Project: p, Session: session, Requests: reqs, Messages: msgs, Question: q, Permission: perm, Mode: "build", Models: s.models(), Model: model, Streaming: streaming}, nil
+	var stats *pi.SessionStats
+	if s.agent != nil {
+		stats = s.agent.Stats(projectID)
+	}
+	return AgentPage{Project: p, Session: session, Requests: reqs, Messages: msgs, Question: q, Permission: perm, Mode: "build", Models: s.models(), Model: model, Streaming: streaming, Stats: stats}, nil
 }
 
 func (s *Service) models() []ModelOption {
@@ -226,8 +230,13 @@ func (s *Service) ResolvePermission(ctx context.Context, id int64, approved bool
 // --- pi.Sink implementation: events from the agent process land here. ---
 
 func (s *Service) AssistantMessage(projectID, requestID int64, content string) {
-	if err := s.repo.InsertMessage(context.Background(), requestID, "assistant", "completed", content); err != nil {
+	if err := s.repo.FinalizeAssistant(context.Background(), requestID, content); err != nil {
 		log.Printf("persist assistant message (project %d): %v", projectID, err)
+	}
+}
+func (s *Service) AssistantPartial(projectID, requestID int64, content string) {
+	if err := s.repo.UpsertPartialAssistant(context.Background(), requestID, content); err != nil {
+		log.Printf("persist streaming text (project %d): %v", projectID, err)
 	}
 }
 func (s *Service) ToolMessage(projectID, requestID int64, content string) {
@@ -294,6 +303,7 @@ Producing Mac apps (oozie's publish pipeline):
 - When the user asks for an app, scaffold a Swift package at the project root: a Package.swift with a single executable target, macOS platform .macOS(.v13) or later, sources under Sources/.
 - For GUI apps, use SwiftUI with an explicit AppDelegate-free entry (@main struct conforming to App) and call NSApplication.shared.setActivationPolicy(.regular) plus NSApp.activate(ignoringOtherApps: true) at launch so the window appears when run from a bundle.
 - Verify with 'swift build' before declaring the work done.
+- Optionally place a 1024x1024 icon.png (or icon.icns) at the project root; oozie converts it into the app icon when publishing.
 - oozie's Publish action runs 'swift build -c release' and wraps the executable in a .app bundle, so the package MUST build cleanly from the project root with no extra steps. If you instead produce an .xcodeproj, place the final built .app in the project root or dist/.`, p.Name, workdir)
 }
 

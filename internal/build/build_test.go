@@ -1,9 +1,13 @@
 package build
 
 import (
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +28,7 @@ let package = Package(
 )
 `)
 	writeFile(t, filepath.Join(dir, "Sources", "HelloOozie", "main.swift"), `print("hello from oozie")`)
+	writeTestPNG(t, filepath.Join(dir, "icon.png"))
 
 	appPath, err := SwiftBuilder{}.Build(dir, "Hello Oozie")
 	if err != nil {
@@ -45,6 +50,37 @@ let package = Package(
 	}
 	if string(out) != "hello from oozie\n" {
 		t.Errorf("executable output = %q", out)
+	}
+
+	if _, err := os.Stat(filepath.Join(appPath, "Contents", "Resources", "AppIcon.icns")); err != nil {
+		t.Errorf("icon.png was not converted to AppIcon.icns: %v", err)
+	}
+	plist, _ := os.ReadFile(filepath.Join(appPath, "Contents", "Info.plist"))
+	if !strings.Contains(string(plist), "CFBundleIconFile") {
+		t.Error("Info.plist missing CFBundleIconFile")
+	}
+	if _, err := exec.LookPath("codesign"); err == nil {
+		if err := exec.Command("codesign", "--verify", appPath).Run(); err != nil {
+			t.Errorf("bundle signature does not verify: %v", err)
+		}
+	}
+}
+
+func writeTestPNG(t *testing.T, path string) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for x := 0; x < 64; x++ {
+		for y := 0; y < 64; y++ {
+			img.Set(x, y, color.RGBA{R: 120, G: 160, B: 255, A: 255})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
 	}
 }
 

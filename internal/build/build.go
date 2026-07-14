@@ -65,8 +65,9 @@ func (b SwiftBuilder) Build(workdir, appName string) (string, error) {
 	return assembleBundle(workdir, appName, executable)
 }
 
-// assembleBundle writes dist/<AppName>.app with the executable and a
-// minimal Info.plist, and returns the bundle's absolute path.
+// assembleBundle writes dist/<AppName>.app with the executable, an app
+// icon when the project provides one, and a minimal Info.plist, then
+// ad-hoc signs the bundle. Returns the bundle's absolute path.
 func assembleBundle(workdir, appName, executable string) (string, error) {
 	bundle := filepath.Join(workdir, "dist", appName+".app")
 	macos := filepath.Join(bundle, "Contents", "MacOS")
@@ -82,6 +83,11 @@ func assembleBundle(workdir, appName, executable string) (string, error) {
 		return "", fmt.Errorf("copy executable: %w", err)
 	}
 
+	iconEntry := ""
+	if installIcon(workdir, bundle) {
+		iconEntry = "\t<key>CFBundleIconFile</key><string>AppIcon</string>\n"
+	}
+
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -93,11 +99,19 @@ func assembleBundle(workdir, appName, executable string) (string, error) {
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>1.0.0</string>
 	<key>NSHighResolutionCapable</key><true/>
-</dict>
+%s</dict>
 </plist>
-`, appName, appName, execName, bundleSlug(appName))
+`, appName, appName, execName, bundleSlug(appName), iconEntry)
 	if err := os.WriteFile(filepath.Join(bundle, "Contents", "Info.plist"), []byte(plist), 0o644); err != nil {
 		return "", err
+	}
+
+	// Ad-hoc sign so Finder and Gatekeeper treat the bundle as intact.
+	// Failure is non-fatal: the executable is already linker-signed.
+	if _, err := exec.LookPath("codesign"); err == nil {
+		if out, err := exec.Command("codesign", "--force", "--deep", "-s", "-", bundle).CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "codesign (non-fatal): %s\n", strings.TrimSpace(string(out)))
+		}
 	}
 
 	abs, err := filepath.Abs(bundle)
@@ -105,6 +119,66 @@ func assembleBundle(workdir, appName, executable string) (string, error) {
 		return bundle, nil
 	}
 	return abs, nil
+}
+
+// installIcon looks for an icon the project provides — icon.icns, or a
+// PNG (icon.png / AppIcon.png / Icon.png) converted via sips + iconutil —
+// and writes Contents/Resources/AppIcon.icns. Returns true on success.
+func installIcon(workdir, bundle string) bool {
+	resources := filepath.Join(bundle, "Contents", "Resources")
+	target := filepath.Join(resources, "AppIcon.icns")
+
+	if src := filepath.Join(workdir, "icon.icns"); fileExists(src) {
+		if os.MkdirAll(resources, 0o755) == nil && copyFile(src, target, 0o644) == nil {
+			return true
+		}
+		return false
+	}
+
+	var png string
+	for _, name := range []string{"icon.png", "AppIcon.png", "Icon.png"} {
+		if p := filepath.Join(workdir, name); fileExists(p) {
+			png = p
+			break
+		}
+	}
+	if png == "" {
+		return false
+	}
+	if _, err := exec.LookPath("sips"); err != nil {
+		return false
+	}
+	if _, err := exec.LookPath("iconutil"); err != nil {
+		return false
+	}
+
+	iconset, err := os.MkdirTemp("", "oozie-iconset-*")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(iconset)
+	set := filepath.Join(iconset, "AppIcon.iconset")
+	if err := os.Mkdir(set, 0o755); err != nil {
+		return false
+	}
+	for _, size := range []int{16, 32, 128, 256, 512} {
+		for scale, suffix := range map[int]string{1: "", 2: "@2x"} {
+			px := size * scale
+			out := filepath.Join(set, fmt.Sprintf("icon_%dx%d%s.png", size, size, suffix))
+			if err := exec.Command("sips", "-z", fmt.Sprint(px), fmt.Sprint(px), png, "--out", out).Run(); err != nil {
+				return false
+			}
+		}
+	}
+	if err := os.MkdirAll(resources, 0o755); err != nil {
+		return false
+	}
+	return exec.Command("iconutil", "-c", "icns", set, "-o", target).Run() == nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // findExecutable picks the built executable from the Swift bin path,

@@ -6,7 +6,7 @@ A Mac app for building mini Mac apps. oozie runs entirely on your machine: you d
 
 1. **Create a project** — pick a name and directory; mark it Trusted (agent works freely) or untrusted (every write/edit/bash call needs your approval in the permission panel).
 2. **Talk to the agent** — Plan mode for a proposal, Build mode to implement. The agent runs your local `pi` instance (`pi --mode rpc`) in the project directory with a persistent session, so context survives restarts. The model picker mirrors your terminal pi's `enabledModels`.
-3. **Publish** — save a draft (name, headline, description), hit Publish. A real job runs `swift build -c release` and wraps the executable in `dist/<Name>.app` (ad-hoc signed; an `icon.png`/`icon.icns` at the project root becomes the app icon); on success the app appears in your Store.
+3. **Publish** — hit Publish (a draft is optional: blank fields fall back to sensible defaults you can polish later). A real job runs `swift build -c release` and wraps the executable in `dist/<Name>.app` (ad-hoc signed; an `icon.png`/`icon.icns` at the project root becomes the app icon); on success the app appears in your Store.
 4. **Install & open** — Install copies the bundle to `~/Applications`; Open launches it.
 
 ## Living apps

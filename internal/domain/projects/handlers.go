@@ -449,8 +449,11 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = r.ParseForm()
 	// The Publish button lives inside the draft form: save the current
-	// form values first so one click does the whole thing.
-	if r.FormValue("app_name") != "" || r.FormValue("headline") != "" || r.FormValue("description") != "" {
+	// form values first so one click does the whole thing. Blank fields
+	// get defaults in SaveDraft, and skipping the save would drop the
+	// non-text fields (like the disposable-app lifetime), so save
+	// whenever the form was actually submitted with the request.
+	if r.Form.Has("app_name") || r.Form.Has("expires_days") {
 		d := draftFromForm(id, r)
 		if err := h.service.SaveDraft(r.Context(), d); err != nil {
 			h.renderJobs(w, r, "", err.Error())

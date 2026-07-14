@@ -369,7 +369,7 @@ func (h *Handlers) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.ParseForm()
-	d := PublishDraft{ProjectID: id, AppName: r.FormValue("app_name"), Headline: r.FormValue("headline"), Description: r.FormValue("description"), Changelog: r.FormValue("changelog"), PublishTarget: r.FormValue("publish_target"), Visibility: r.FormValue("visibility"), ScreenshotManifest: r.FormValue("screenshot_manifest")}
+	d := draftFromForm(id, r)
 	err := h.service.SaveDraft(r.Context(), d)
 	if err != nil {
 		h.renderer.HTML(w, 422, "partials/publishing/form", render.ViewData{Flash: err.Error(), Data: map[string]any{"Draft": d}})
@@ -386,7 +386,7 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) {
 	// The Publish button lives inside the draft form: save the current
 	// form values first so one click does the whole thing.
 	if r.FormValue("app_name") != "" || r.FormValue("headline") != "" || r.FormValue("description") != "" {
-		d := PublishDraft{ProjectID: id, AppName: r.FormValue("app_name"), Headline: r.FormValue("headline"), Description: r.FormValue("description"), Changelog: r.FormValue("changelog"), PublishTarget: r.FormValue("publish_target"), Visibility: r.FormValue("visibility"), ScreenshotManifest: r.FormValue("screenshot_manifest")}
+		d := draftFromForm(id, r)
 		if err := h.service.SaveDraft(r.Context(), d); err != nil {
 			h.renderJobs(w, r, "", err.Error())
 			return
@@ -398,6 +398,14 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderJobs(w, r, "Publishing started — building your app…", "")
+}
+
+func draftFromForm(projectID int64, r *http.Request) PublishDraft {
+	days, _ := strconv.Atoi(r.FormValue("expires_days"))
+	if days < 0 {
+		days = 0
+	}
+	return PublishDraft{ProjectID: projectID, AppName: r.FormValue("app_name"), Headline: r.FormValue("headline"), Description: r.FormValue("description"), Changelog: r.FormValue("changelog"), PublishTarget: r.FormValue("publish_target"), Visibility: r.FormValue("visibility"), ScreenshotManifest: r.FormValue("screenshot_manifest"), ExpiresDays: days}
 }
 
 func (h *Handlers) renderJobs(w http.ResponseWriter, r *http.Request, flash, errMsg string) {

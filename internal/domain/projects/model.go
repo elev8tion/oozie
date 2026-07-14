@@ -95,6 +95,7 @@ type PublishDraft struct {
 	PublishTarget      string
 	Visibility         string
 	ScreenshotManifest string
+	ExpiresDays        int // 0 = permanent; otherwise the app self-destructs after N days
 	OrganizationID     *int64
 	SavedAt            time.Time
 }
@@ -118,6 +119,18 @@ type StoreApp struct {
 	LaunchCount      int
 	LastLaunchAt     *time.Time
 	CreatedAt        time.Time
+}
+
+// ExpiresInDays returns whole days until self-destruction (0 = today).
+func (s StoreApp) ExpiresInDays() int {
+	if s.ExpiresAt == nil {
+		return 0
+	}
+	d := int(time.Until(*s.ExpiresAt).Hours() / 24)
+	if d < 0 {
+		return 0
+	}
+	return d
 }
 
 // Dormant reports an installed app that hasn't been opened in two weeks

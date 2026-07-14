@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"oozie/internal/agent/pi"
 	"oozie/internal/build"
@@ -53,6 +54,47 @@ func (s *Service) SetBuilder(b build.AppBuilder) { s.builder = b }
 
 // WaitForJobs blocks until all in-flight publishing jobs settle.
 func (s *Service) WaitForJobs() { s.jobs.Wait() }
+
+// StartBackground launches oozie's clocks: the TTL reaper that
+// self-destructs disposable apps. Loops exit when ctx is cancelled.
+func (s *Service) StartBackground(ctx context.Context) {
+	go s.reapLoop(ctx)
+}
+
+func (s *Service) reapLoop(ctx context.Context) {
+	s.reapExpiredApps(ctx)
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.reapExpiredApps(ctx)
+		}
+	}
+}
+
+// reapExpiredApps uninstalls and delists disposable apps whose TTL has
+// passed. Projects are untouched: republishing resurrects the app.
+func (s *Service) reapExpiredApps(ctx context.Context) {
+	ids, err := s.repo.ExpiredAppIDs(ctx)
+	if err != nil {
+		log.Printf("reap expired apps: %v", err)
+		return
+	}
+	for _, id := range ids {
+		app, err := s.repo.GetStoreApp(ctx, id)
+		if err != nil {
+			continue
+		}
+		if err := s.RemoveStoreApp(ctx, id); err != nil {
+			log.Printf("reap %q: %v", app.Name, err)
+			continue
+		}
+		log.Printf("disposable app %q reached its expiry and was removed", app.Name)
+	}
+}
 
 // RecoverOrphanedJobs fails jobs stranded by a previous process. Run once
 // at startup, before the server accepts requests.

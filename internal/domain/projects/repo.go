@@ -267,14 +267,14 @@ func (r *Repo) SaveFeedback(ctx context.Context, projectID int64, typ, reason, e
 func (r *Repo) GetDraft(ctx context.Context, projectID int64) (PublishDraft, error) {
 	var d PublishDraft
 	var org sql.NullInt64
-	err := r.db.QueryRowContext(ctx, `SELECT project_id,app_name,headline,description,changelog,publish_target,visibility,screenshot_manifest,organization_id,saved_at FROM publish_drafts WHERE project_id=?`, projectID).Scan(&d.ProjectID, &d.AppName, &d.Headline, &d.Description, &d.Changelog, &d.PublishTarget, &d.Visibility, &d.ScreenshotManifest, &org, &d.SavedAt)
+	err := r.db.QueryRowContext(ctx, `SELECT project_id,app_name,headline,description,changelog,publish_target,visibility,screenshot_manifest,expires_days,organization_id,saved_at FROM publish_drafts WHERE project_id=?`, projectID).Scan(&d.ProjectID, &d.AppName, &d.Headline, &d.Description, &d.Changelog, &d.PublishTarget, &d.Visibility, &d.ScreenshotManifest, &d.ExpiresDays, &org, &d.SavedAt)
 	if org.Valid {
 		d.OrganizationID = &org.Int64
 	}
 	return d, err
 }
 func (r *Repo) SaveDraft(ctx context.Context, d PublishDraft) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO publish_drafts (project_id,app_name,headline,description,changelog,publish_target,visibility,screenshot_manifest,organization_id,saved_at) VALUES (?,?,?,?,?,?,?,?,1,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET app_name=excluded.app_name,headline=excluded.headline,description=excluded.description,changelog=excluded.changelog,publish_target=excluded.publish_target,visibility=excluded.visibility,screenshot_manifest=excluded.screenshot_manifest,saved_at=CURRENT_TIMESTAMP`, d.ProjectID, d.AppName, d.Headline, d.Description, d.Changelog, d.PublishTarget, d.Visibility, d.ScreenshotManifest)
+	_, err := r.db.ExecContext(ctx, `INSERT INTO publish_drafts (project_id,app_name,headline,description,changelog,publish_target,visibility,screenshot_manifest,expires_days,organization_id,saved_at) VALUES (?,?,?,?,?,?,?,?,?,1,CURRENT_TIMESTAMP) ON CONFLICT(project_id) DO UPDATE SET app_name=excluded.app_name,headline=excluded.headline,description=excluded.description,changelog=excluded.changelog,publish_target=excluded.publish_target,visibility=excluded.visibility,screenshot_manifest=excluded.screenshot_manifest,expires_days=excluded.expires_days,saved_at=CURRENT_TIMESTAMP`, d.ProjectID, d.AppName, d.Headline, d.Description, d.Changelog, d.PublishTarget, d.Visibility, d.ScreenshotManifest, d.ExpiresDays)
 	return err
 }
 func (r *Repo) CreateJob(ctx context.Context, projectID int64) (int64, error) {
@@ -305,8 +305,9 @@ func (r *Repo) FinishJob(ctx context.Context, id int64, status, errMsg string, s
 func (r *Repo) UpsertStoreApp(ctx context.Context, projectID int64, d PublishDraft, artifactPath, slug string) (int64, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx, `SELECT id FROM store_apps WHERE project_id=?`, projectID).Scan(&id)
+	expiry := `CASE WHEN CAST(? AS INTEGER) > 0 THEN datetime('now', '+' || ? || ' days') ELSE NULL END`
 	if err == sql.ErrNoRows {
-		res, err := r.db.ExecContext(ctx, `INSERT INTO store_apps (project_id,organization_id,name,headline,description,visibility,published_version,last_published_at,artifact_path,bundle_slug) VALUES (?,1,?,?,?,?,'1.0.0',CURRENT_TIMESTAMP,?,?)`, projectID, d.AppName, d.Headline, d.Description, d.Visibility, artifactPath, slug)
+		res, err := r.db.ExecContext(ctx, `INSERT INTO store_apps (project_id,organization_id,name,headline,description,visibility,published_version,last_published_at,artifact_path,bundle_slug,expires_at) VALUES (?,1,?,?,?,?,'1.0.0',CURRENT_TIMESTAMP,?,?,`+expiry+`)`, projectID, d.AppName, d.Headline, d.Description, d.Visibility, artifactPath, slug, d.ExpiresDays, d.ExpiresDays)
 		if err != nil {
 			return 0, err
 		}
@@ -315,8 +316,26 @@ func (r *Repo) UpsertStoreApp(ctx context.Context, projectID int64, d PublishDra
 	if err != nil {
 		return 0, err
 	}
-	_, err = r.db.ExecContext(ctx, `UPDATE store_apps SET name=?, headline=?, description=?, visibility=?, last_published_at=CURRENT_TIMESTAMP, artifact_path=?, bundle_slug=? WHERE id=?`, d.AppName, d.Headline, d.Description, d.Visibility, artifactPath, slug, id)
+	_, err = r.db.ExecContext(ctx, `UPDATE store_apps SET name=?, headline=?, description=?, visibility=?, last_published_at=CURRENT_TIMESTAMP, artifact_path=?, bundle_slug=?, expires_at=`+expiry+` WHERE id=?`, d.AppName, d.Headline, d.Description, d.Visibility, artifactPath, slug, d.ExpiresDays, d.ExpiresDays, id)
 	return id, err
+}
+
+// ExpiredAppIDs lists disposable apps whose time has come.
+func (r *Repo) ExpiredAppIDs(ctx context.Context) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM store_apps WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // StoreAppSlugForProject returns the published slug for a project, or ""

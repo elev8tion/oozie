@@ -240,3 +240,39 @@ func TestImproveLoopFailedAgent(t *testing.T) {
 		t.Fatalf("failed agent run must not publish, got %d jobs", len(jobs))
 	}
 }
+
+// TestReaperRemovesExpiredApps proves disposable apps self-destruct: an
+// app published with a past expiry is uninstalled and delisted by the
+// reaper sweep, while permanent apps survive.
+func TestReaperRemovesExpiredApps(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	p, _ := s.CreateProject(ctx, "Ephemeral", filepath.Join(t.TempDir(), "e"), true)
+	id, err := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Ephemeral", Headline: "h", Description: "d", ExpiresDays: 1}, "", "ephemeral")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, _ := s.CreateProject(ctx, "Forever", filepath.Join(t.TempDir(), "f2"), true)
+	if _, err := s.repo.UpsertStoreApp(ctx, p2.ID, PublishDraft{AppName: "Forever", Headline: "h", Description: "d"}, "", "forever"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Not yet expired: sweep must keep it.
+	s.reapExpiredApps(ctx)
+	if _, err := s.GetStoreApp(ctx, id); err != nil {
+		t.Fatalf("unexpired app was reaped: %v", err)
+	}
+
+	// Force the expiry into the past and sweep again.
+	if _, err := s.repo.db.ExecContext(ctx, `UPDATE store_apps SET expires_at=datetime('now','-1 hour') WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	s.reapExpiredApps(ctx)
+	if _, err := s.GetStoreApp(ctx, id); err == nil {
+		t.Fatal("expired app still in store after reap")
+	}
+	apps, _ := s.ListStoreApps(ctx, "", "")
+	if len(apps) != 1 || apps[0].Name != "Forever" {
+		t.Fatalf("permanent app should survive the reap, got %v", apps)
+	}
+}

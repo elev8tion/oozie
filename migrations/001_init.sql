@@ -153,28 +153,3 @@ CREATE TABLE IF NOT EXISTS user_settings (
 INSERT OR IGNORE INTO users (id, display_name) VALUES (1, 'Solo Builder');
 INSERT OR IGNORE INTO organizations (id, name) VALUES (1, 'Personal Workspace');
 INSERT OR IGNORE INTO user_settings (user_id) VALUES (1);
-
-INSERT OR IGNORE INTO projects (id, owner_user_id, organization_id, name, project_path_display, trusted, archived, status, created_at, updated_at) VALUES
-  (1, 1, 1, 'Launch Notes', '~/Projects/launch-notes', 1, 0, 'building', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-  (2, 1, 1, 'Tiny CRM', '~/Projects/tiny-crm', 1, 0, 'ready', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-
-INSERT OR IGNORE INTO agent_sessions (id, project_id, title) VALUES (1, 1, 'Build session');
-INSERT OR IGNORE INTO agent_requests (id, session_id, status, mode, completed_at) VALUES (1, 1, 'completed', 'plan', CURRENT_TIMESTAMP);
-INSERT OR IGNORE INTO agent_messages (id, request_id, role, status, content, metadata_json) VALUES
-  (1, 1, 'user', 'completed', 'Plan the first version and note publishing risks.', '{}'),
-  (2, 1, 'assistant', 'completed', 'Plan ready: create the core workspace, seed a publish draft, and keep store integration stubbed until the UI flow feels right.', '{}');
-INSERT OR IGNORE INTO attachments (id, project_id, request_id, filename, mime_type, size_bytes, storage_path) VALUES (1, 1, 1, 'context.md', 'text/markdown', 2048, 'local/context.md');
-
-INSERT OR IGNORE INTO store_apps (id, project_id, organization_id, name, headline, description, visibility, published_version, last_published_at, install_count, featured) VALUES
-  (1, NULL, NULL, 'Prompt Vault', 'Save reusable build prompts', 'A compact prompt library for solo builders.', 'public', '1.2.0', CURRENT_TIMESTAMP, 42, 1),
-  (2, NULL, 1, 'Draft Board', 'Plan releases before publishing', 'Organization-visible publish planning board.', 'organization', '0.8.1', CURRENT_TIMESTAMP, 7, 1),
-  (3, NULL, NULL, 'Bug Lens', 'Review failed sessions quickly', 'Surfaces errors, approvals, and retry notes from agent sessions.', 'public', '1.0.0', CURRENT_TIMESTAMP, 18, 0);
-
-INSERT OR IGNORE INTO installed_apps (store_app_id, user_id) VALUES (1, 1);
-
-INSERT OR IGNORE INTO publish_drafts (project_id, app_name, headline, description, changelog, publish_target, visibility, screenshot_manifest, organization_id) VALUES
-  (1, 'Launch Notes', 'A small app for release notes', 'Collect, polish, and publish concise release updates.', '- Initial project shell\n- Store draft flow', 'public', 'unlisted', '[{"name":"dashboard.png"}]', 1);
-
-INSERT OR IGNORE INTO publishing_jobs (id, project_id, store_app_id, status, error_message) VALUES
-  (1, 1, 1, 'succeeded', ''),
-  (2, 2, NULL, 'failed', 'Missing headline and screenshot manifest.');

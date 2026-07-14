@@ -8,6 +8,14 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// Apply theme/style changes instantly when the settings selects change;
+// the POST persists them for future page loads.
+document.addEventListener('change', (event) => {
+  const el = event.target;
+  if (el && el.name === 'appearance') document.documentElement.dataset.theme = el.value;
+  if (el && el.name === 'style_profile') document.documentElement.dataset.style = el.value;
+});
+
 document.body.addEventListener('htmx:afterSwap', (event) => {
   const toastRegion = document.getElementById('toast-region');
   const notice = event.detail.target && event.detail.target.querySelector && event.detail.target.querySelector('.notice');

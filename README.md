@@ -1,44 +1,47 @@
 # oozie
 
-A server-rendered Go + HTMX + SQLite desktop-style workspace inspired by the scanned Glaze-like flows, rebuilt for solo local use.
+A Mac app for building mini Mac apps. oozie runs entirely on your machine: you describe an app, your local **pi** agent builds it in a real project directory, and oozie's publish pipeline compiles it into a `.app` bundle you can install into `~/Applications` and launch from your Dock.
+
+## The loop
+
+1. **Create a project** — pick a name and directory; mark it Trusted (agent works freely) or untrusted (every write/edit/bash call needs your approval in the permission panel).
+2. **Talk to the agent** — Plan mode for a proposal, Build mode to implement. The agent runs your local `pi` instance (`pi --mode rpc`) in the project directory with a persistent session, so context survives restarts. The model picker mirrors your terminal pi's `enabledModels`.
+3. **Publish** — save a draft (name, headline, description), hit Publish. A real job runs `swift build -c release` and wraps the executable in `dist/<Name>.app`; on success the app appears in your Store.
+4. **Install & open** — Install copies the bundle to `~/Applications`; Open launches it.
 
 ## Features
 
-- Project dashboard, create/open/archive flows, trusted display path flag
-- Project-bound agent sessions powered by your local **pi** instance (`pi --mode rpc`): real build/plan requests run in the project's directory, streaming into the timeline, with pi's dialogs surfaced as oozie question/permission panels
-- Model picker mirrors the models enabled in your terminal pi (`~/.pi/agent/settings.json` → `enabledModels`); switching models in the UI switches the live pi process
-- Each project gets a persistent pi session (`--session-id`), so the agent keeps its context across app restarts; the project's Trusted flag maps to pi's `--approve`
-- Store browsing, public/org/featured filters, install state, installed apps page
-- Publish draft form and simulated publishing jobs
-- Local settings for general, appearance, and agent shortcuts
-- Dense macOS-inspired UI with light/dark support, toasts, panels, compact tables, dialogs/confirm prompts, accessible labels and focus states
-
-## Stack
-
-- Go `net/http`
-- HTMX fragments for normal UI updates
-- SQLite via `database/sql`
-- `html/template`
-- Minimal JavaScript for Cmd/Ctrl+Enter and toast polish
+- Project dashboard: create/open/archive, search and filter
+- Agent sessions with plan/build modes, model switching, cancel, question & permission panels; untrusted projects are gated by a fail-closed approval extension
+- Real publishing: `queued → running → succeeded/failed` jobs with error output, auto-refreshing job list
+- Store of your published apps with install/open/reinstall
+- Settings: theme (system/light/dark) and accent style, applied instantly and persisted
+- Styled error pages, request logging, panic recovery, graceful shutdown (pi subprocesses are reaped on quit)
 
 ## Run
 
 ```bash
-go run ./cmd/app
+make run          # dev server on http://127.0.0.1:8080
+make app          # build dist/oozie.app (double-clickable)
+make install-app  # build and install oozie.app into ~/Applications
+make test         # go test ./...
 ```
 
-Then open <http://localhost:8080>.
+The binary is fully self-contained (templates, CSS, JS, and migrations are embedded). Data lives in `~/Library/Application Support/oozie/app.db`; an existing repo-local `data/app.db` is migrated there automatically on first run.
 
-Environment variables:
+## Requirements
 
-- `ADDR` (default `:8080`)
-- `DATABASE_PATH` (default `data/app.db`)
-- `MIGRATIONS_DIR` (default `migrations`)
-- `PI_BIN` (default `pi`) — path to the pi binary used for agent sessions
+- macOS with the Swift toolchain (Xcode or Command Line Tools) — used to compile published apps
+- [pi](https://github.com/) installed and configured (`~/.pi/agent/settings.json`) — the coding agent
+- Go 1.24+ to build oozie itself
 
-## Checks
+## Environment variables
 
-```bash
-go test ./...
-go build ./cmd/app
-```
+- `ADDR` (default `127.0.0.1:8080`)
+- `DATABASE_PATH` (default `~/Library/Application Support/oozie/app.db`)
+- `PI_BIN` (default `pi`) — path to the pi binary
+- `OOZIE_OPEN_BROWSER=1` — open the UI in the default browser on start (the .app bundle sets this)
+
+## Stack
+
+Go `net/http` · HTMX · SQLite (`modernc.org/sqlite`) · `html/template` · embedded assets via `embed.FS`

@@ -1,19 +1,30 @@
 package app
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 type Config struct {
-	Addr          string
-	DatabasePath  string
-	MigrationsDir string
+	Addr         string
+	DatabasePath string
 }
 
 func LoadConfig() Config {
 	return Config{
-		Addr:          env("ADDR", ":8080"),
-		DatabasePath:  env("DATABASE_PATH", "data/app.db"),
-		MigrationsDir: env("MIGRATIONS_DIR", "migrations"),
+		Addr:         env("ADDR", "127.0.0.1:8080"),
+		DatabasePath: env("DATABASE_PATH", defaultDatabasePath()),
 	}
+}
+
+// defaultDatabasePath keeps the database in the standard macOS location so
+// the app works no matter where the binary lives.
+func defaultDatabasePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "data/app.db"
+	}
+	return filepath.Join(home, "Library", "Application Support", "oozie", "app.db")
 }
 
 func env(key string, fallback string) string {

@@ -6,7 +6,7 @@
 
 {{define "pages/publishing/show-content"}}
 {{$p := index .Data "Project"}}
-<section class="toolbar"><div><p class="eyebrow">Publish Draft</p><h1>{{$p.Name}}</h1><p class="muted">Save a local draft, then create a simulated publishing job.</p></div><form hx-post="/projects/{{$p.ID}}/publish" hx-target="#publishing-job-list"><button class="button primary">Publish</button></form></section>
+<section class="toolbar"><div><p class="eyebrow">Publish Draft</p><h1>{{$p.Name}}</h1><p class="muted">Save the draft, then Publish to build this project into a .app and add it to your store.</p></div><form hx-post="/projects/{{$p.ID}}/publish" hx-target="#publishing-job-list"><button class="button primary">Publish</button></form></section>
 <div id="publish-draft-form">{{template "partials/publishing/form" .}}</div>
 <h2>Recent jobs</h2><div id="publishing-job-list" hx-get="/fragments/publishing/jobs" hx-trigger="load">Loading…</div>
 {{end}}

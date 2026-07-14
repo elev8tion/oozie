@@ -3,23 +3,38 @@ package projects
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"oozie/internal/agent/pi"
+	"oozie/internal/build"
 )
 
 type Service struct {
 	repo    *Repo
 	agent   *pi.Manager
 	catalog pi.Catalog
+	builder build.AppBuilder
+	jobs    sync.WaitGroup
 }
 
-func NewService(repo *Repo) *Service { return &Service{repo: repo} }
+func NewService(repo *Repo) *Service {
+	return &Service{repo: repo, builder: build.SwiftBuilder{}}
+}
+
+// SetBuilder swaps the app builder (tests use a fake).
+func (s *Service) SetBuilder(b build.AppBuilder) { s.builder = b }
+
+// WaitForJobs blocks until all in-flight publishing jobs settle.
+func (s *Service) WaitForJobs() { s.jobs.Wait() }
 
 // SetAgent wires the pi RPC manager after construction (the manager's
 // event sink is this service, so the two reference each other).
@@ -69,13 +84,12 @@ func (s *Service) AgentPage(ctx context.Context, projectID int64) (AgentPage, er
 	reqs, _ := s.repo.ListRequests(ctx, session.ID)
 	q, _ := s.repo.PendingQuestion(ctx, projectID)
 	perm, _ := s.repo.PendingPermission(ctx, projectID)
-	atts, _ := s.repo.ListAttachments(ctx, projectID)
 	model := session.Model
 	if model == "" {
 		model = s.catalog.DefaultModel
 	}
 	streaming := len(reqs) > 0 && (reqs[0].Status == "streaming" || reqs[0].Status == "waiting")
-	return AgentPage{Project: p, Session: session, Requests: reqs, Messages: msgs, Question: q, Permission: perm, Attachments: atts, Mode: "build", Models: s.models(), Model: model, Streaming: streaming}, nil
+	return AgentPage{Project: p, Session: session, Requests: reqs, Messages: msgs, Question: q, Permission: perm, Mode: "build", Models: s.models(), Model: model, Streaming: streaming}, nil
 }
 
 func (s *Service) models() []ModelOption {
@@ -267,14 +281,20 @@ func newPiSessionID(projectID int64) string {
 }
 
 func oozieSystemPrompt(p Project, workdir string) string {
-	return fmt.Sprintf(`You are running inside oozie, a local project workspace UI, as the agent for the project %q (working directory: %s).
+	return fmt.Sprintf(`You are running inside oozie, a local macOS workspace whose purpose is building small personal Mac apps, as the agent for the project %q (working directory: %s).
 
 How to behave in oozie:
 - Requests arrive in one of two modes, stated at the top of each message.
 - PLAN mode: produce a concise, numbered implementation plan. Do not create, modify, or delete any files. End by asking whether to proceed.
 - BUILD mode: implement the request directly in the working directory, verifying your work as you go (build/tests where applicable).
 - Your responses are rendered in a compact web timeline; keep them focused and skip decorative preamble.
-- The user approves questions and permission dialogs through the oozie side panel; when you ask via a dialog, wait for that response.`, p.Name, workdir)
+- The user approves questions and permission dialogs through the oozie side panel; when you ask via a dialog, wait for that response.
+
+Producing Mac apps (oozie's publish pipeline):
+- When the user asks for an app, scaffold a Swift package at the project root: a Package.swift with a single executable target, macOS platform .macOS(.v13) or later, sources under Sources/.
+- For GUI apps, use SwiftUI with an explicit AppDelegate-free entry (@main struct conforming to App) and call NSApplication.shared.setActivationPolicy(.regular) plus NSApp.activate(ignoringOtherApps: true) at launch so the window appears when run from a bundle.
+- Verify with 'swift build' before declaring the work done.
+- oozie's Publish action runs 'swift build -c release' and wraps the executable in a .app bundle, so the package MUST build cleanly from the project root with no extra steps. If you instead produce an .xcodeproj, place the final built .app in the project root or dist/.`, p.Name, workdir)
 }
 
 func wrapModeMessage(mode, message string) string {
@@ -309,9 +329,54 @@ func (s *Service) SaveDraft(ctx context.Context, d PublishDraft) error {
 	}
 	return s.repo.SaveDraft(ctx, d)
 }
+
+// Publish builds the project into a .app bundle asynchronously: a job is
+// queued immediately, a background worker runs the build, and on success
+// the app appears in (or updates) the store with its artifact path.
 func (s *Service) Publish(ctx context.Context, projectID int64) error {
-	return s.repo.Publish(ctx, projectID)
+	draft, err := s.repo.GetDraft(ctx, projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrValidation{"Save a publish draft (name, headline, description) before publishing."}
+	}
+	if err != nil {
+		return err
+	}
+	project, err := s.repo.GetProject(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	workdir, err := projectWorkdir(project)
+	if err != nil {
+		return ErrValidation{"Project directory unavailable: " + err.Error()}
+	}
+	jobID, err := s.repo.CreateJob(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	s.jobs.Add(1)
+	go s.runPublishJob(jobID, projectID, draft, workdir)
+	return nil
 }
+
+func (s *Service) runPublishJob(jobID, projectID int64, draft PublishDraft, workdir string) {
+	defer s.jobs.Done()
+	ctx := context.Background()
+	if err := s.repo.SetJobRunning(ctx, jobID); err != nil {
+		log.Printf("publish job %d: %v", jobID, err)
+	}
+	appPath, err := s.builder.Build(workdir, draft.AppName)
+	if err != nil {
+		_ = s.repo.FinishJob(ctx, jobID, "failed", err.Error(), nil)
+		return
+	}
+	appID, err := s.repo.UpsertStoreApp(ctx, projectID, draft, appPath)
+	if err != nil {
+		_ = s.repo.FinishJob(ctx, jobID, "failed", "app built but store update failed: "+err.Error(), nil)
+		return
+	}
+	_ = s.repo.FinishJob(ctx, jobID, "succeeded", "", &appID)
+}
+
 func (s *Service) ListJobs(ctx context.Context, status string) ([]PublishingJob, error) {
 	return s.repo.ListJobs(ctx, status)
 }
@@ -321,7 +386,65 @@ func (s *Service) ListStoreApps(ctx context.Context, q, filter string) ([]StoreA
 func (s *Service) GetStoreApp(ctx context.Context, id int64) (StoreApp, error) {
 	return s.repo.GetStoreApp(ctx, id)
 }
-func (s *Service) InstallApp(ctx context.Context, id int64) error { return s.repo.InstallApp(ctx, id) }
+
+// InstallApp copies the built .app bundle into ~/Applications.
+func (s *Service) InstallApp(ctx context.Context, id int64) error {
+	app, err := s.repo.GetStoreApp(ctx, id)
+	if err != nil {
+		return err
+	}
+	if app.ArtifactPath == "" {
+		return ErrValidation{"This app has no built artifact. Publish its project first."}
+	}
+	if _, err := os.Stat(app.ArtifactPath); err != nil {
+		return ErrValidation{"The built app is missing on disk (" + app.ArtifactPath + "). Publish the project again."}
+	}
+	dest, err := installedAppPath(app)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(dest); err != nil {
+		return err
+	}
+	if out, err := exec.CommandContext(ctx, "ditto", app.ArtifactPath, dest).CombinedOutput(); err != nil {
+		return ErrValidation{"Install failed: " + strings.TrimSpace(string(out))}
+	}
+	return s.repo.InstallApp(ctx, id)
+}
+
+// OpenApp launches the installed app from ~/Applications.
+func (s *Service) OpenApp(ctx context.Context, id int64) error {
+	app, err := s.repo.GetStoreApp(ctx, id)
+	if err != nil {
+		return err
+	}
+	if app.ArtifactPath == "" {
+		return ErrValidation{"This app has no built artifact. Publish its project first."}
+	}
+	dest, err := installedAppPath(app)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dest); err != nil {
+		return ErrValidation{"App not found in ~/Applications — install it first."}
+	}
+	if out, err := exec.CommandContext(ctx, "open", dest).CombinedOutput(); err != nil {
+		return ErrValidation{"Open failed: " + strings.TrimSpace(string(out))}
+	}
+	return nil
+}
+
+func installedAppPath(app StoreApp) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Applications", filepath.Base(app.ArtifactPath)), nil
+}
+
 func (s *Service) InstalledApps(ctx context.Context) ([]StoreApp, error) {
 	return s.repo.InstalledApps(ctx)
 }

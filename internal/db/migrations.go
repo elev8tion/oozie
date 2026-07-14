@@ -3,17 +3,19 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"sort"
 )
 
-func RunMigrations(database *sql.DB, dir string) error {
+// RunMigrations applies every unapplied .sql file from the given
+// filesystem (rooted at the migrations directory), in name order.
+func RunMigrations(database *sql.DB, fsys fs.FS) error {
 	if _, err := database.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY);`); err != nil {
 		return fmt.Errorf("create migrations table: %w", err)
 	}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return fmt.Errorf("read migrations dir: %w", err)
 	}
@@ -35,7 +37,7 @@ func RunMigrations(database *sql.DB, dir string) error {
 			continue
 		}
 
-		body, err := os.ReadFile(filepath.Join(dir, name))
+		body, err := fs.ReadFile(fsys, name)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}

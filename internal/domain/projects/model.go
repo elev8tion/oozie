@@ -81,17 +81,6 @@ type PermissionRequest struct {
 	CreatedAt      time.Time
 }
 
-type Attachment struct {
-	ID          int64
-	ProjectID   int64
-	RequestID   *int64
-	Filename    string
-	MimeType    string
-	SizeBytes   int64
-	StoragePath string
-	CreatedAt   time.Time
-}
-
 type PublishDraft struct {
 	ProjectID          int64
 	AppName            string
@@ -118,12 +107,14 @@ type StoreApp struct {
 	InstallCount     int
 	Featured         bool
 	Installed        bool
+	ArtifactPath     string
 	CreatedAt        time.Time
 }
 
 type PublishingJob struct {
 	ID           int64
 	ProjectID    int64
+	ProjectName  string
 	StoreAppID   *int64
 	Status       string
 	ErrorMessage string
@@ -132,10 +123,8 @@ type PublishingJob struct {
 }
 
 type Settings struct {
-	Appearance          string
-	StyleProfile        string
-	AgentShortcut       string
-	SendMessageShortcut string
+	Appearance   string
+	StyleProfile string
 }
 
 type Dashboard struct {
@@ -151,18 +140,17 @@ type ModelOption struct {
 }
 
 type AgentPage struct {
-	Project     Project
-	Session     AgentSession
-	Requests    []AgentRequest
-	Messages    []AgentMessage
-	Question    *PendingQuestion
-	Permission  *PermissionRequest
-	Attachments []Attachment
-	Mode        string
-	Error       string
-	Models      []ModelOption
-	Model       string
-	Streaming   bool
+	Project    Project
+	Session    AgentSession
+	Requests   []AgentRequest
+	Messages   []AgentMessage
+	Question   *PendingQuestion
+	Permission *PermissionRequest
+	Mode       string
+	Error      string
+	Models     []ModelOption
+	Model      string
+	Streaming  bool
 }
 
 type ErrValidation struct{ Message string }

@@ -1,8 +1,6 @@
 package projects
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -18,19 +16,32 @@ func NewHandlers(service *Service, renderer *render.Renderer) *Handlers {
 	return &Handlers{service: service, renderer: renderer}
 }
 
+// page renders a full page in the base layout with the user's saved theme
+// and style applied.
+func (h *Handlers) page(w http.ResponseWriter, r *http.Request, title, content string, data map[string]any) {
+	s, _ := h.service.GetSettings(r.Context())
+	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: title, Content: content, Theme: s.Appearance, Style: s.StyleProfile, Data: data})
+}
+
+// errorPage renders a styled error page in the layout.
+func (h *Handlers) errorPage(w http.ResponseWriter, r *http.Request, status int, message string) {
+	s, _ := h.service.GetSettings(r.Context())
+	h.renderer.HTML(w, status, "layouts/base", render.ViewData{Title: "Error · oozie", Content: "pages/error-content", Theme: s.Appearance, Style: s.StyleProfile, Data: map[string]any{"Code": status, "Message": message}})
+}
+
 func (h *Handlers) Home(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/projects", http.StatusSeeOther)
 }
 func (h *Handlers) Onboarding(w http.ResponseWriter, r *http.Request) {
-	h.renderer.HTML(w, http.StatusOK, "layouts/base", render.ViewData{Title: "Welcome to oozie", Content: "pages/projects/onboarding-content"})
+	h.page(w, r, "Welcome to oozie", "pages/projects/onboarding-content", nil)
 }
 func (h *Handlers) Projects(w http.ResponseWriter, r *http.Request) {
 	ps, err := h.service.ListProjects(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("filter"))
 	if err != nil {
-		http.Error(w, "projects", 500)
+		h.errorPage(w, r, 500, "Couldn't load projects.")
 		return
 	}
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Projects · oozie", Content: "pages/projects/index-content", Data: map[string]any{"Projects": ps, "Q": r.URL.Query().Get("q"), "Filter": r.URL.Query().Get("filter")}})
+	h.page(w, r, "Projects · oozie", "pages/projects/index-content", map[string]any{"Projects": ps, "Q": r.URL.Query().Get("q"), "Filter": r.URL.Query().Get("filter")})
 }
 func (h *Handlers) ProjectsList(w http.ResponseWriter, r *http.Request) {
 	ps, err := h.service.ListProjects(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("filter"))
@@ -41,11 +52,11 @@ func (h *Handlers) ProjectsList(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/projects/list", render.ViewData{Data: map[string]any{"Projects": ps}})
 }
 func (h *Handlers) NewProject(w http.ResponseWriter, r *http.Request) {
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "New Project · oozie", Content: "pages/projects/new-content"})
+	h.page(w, r, "New Project · oozie", "pages/projects/new-content", nil)
 }
 func (h *Handlers) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", 400)
+		h.errorPage(w, r, 400, "That form couldn't be read.")
 		return
 	}
 	p, err := h.service.CreateProject(r.Context(), r.FormValue("name"), r.FormValue("project_path_display"), r.FormValue("trusted") == "on")
@@ -61,19 +72,19 @@ func (h *Handlers) CreateProject(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/projects/"+strconv.FormatInt(p.ID, 10), 303)
 }
 func (h *Handlers) ShowProject(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
 	p, err := h.service.GetProject(r.Context(), id)
 	if err != nil {
-		http.NotFound(w, r)
+		h.errorPage(w, r, 404, "Project not found.")
 		return
 	}
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: p.Name + " · oozie", Content: "pages/projects/show-content", Data: map[string]any{"Project": p}})
+	h.page(w, r, p.Name+" · oozie", "pages/projects/show-content", map[string]any{"Project": p})
 }
 func (h *Handlers) ArchiveProject(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
@@ -87,19 +98,19 @@ func (h *Handlers) ArchiveProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) Agent(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
 	page, err := h.service.AgentPage(r.Context(), id)
 	if err != nil {
-		http.NotFound(w, r)
+		h.errorPage(w, r, 404, "Project not found.")
 		return
 	}
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Agent · " + page.Project.Name, Content: "pages/agents/show-content", Data: map[string]any{"Agent": page}})
+	h.page(w, r, "Agent · "+page.Project.Name, "pages/agents/show-content", map[string]any{"Agent": page})
 }
 func (h *Handlers) AgentRequest(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
@@ -112,7 +123,7 @@ func (h *Handlers) AgentRequest(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/agents/live", render.ViewData{Data: map[string]any{"Agent": page}})
 }
 func (h *Handlers) AgentTimeline(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
@@ -124,7 +135,7 @@ func (h *Handlers) AgentTimeline(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/agents/live", render.ViewData{Data: map[string]any{"Agent": page}})
 }
 func (h *Handlers) SelectAgentModel(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
@@ -138,11 +149,11 @@ func (h *Handlers) SelectAgentModel(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/agents/form", render.ViewData{Flash: flash, Data: map[string]any{"Agent": page}})
 }
 func (h *Handlers) CancelAgentRequest(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
-	rid, ok := pathID(w, r, "requestID")
+	rid, ok := h.pathID(w, r, "requestID")
 	if !ok {
 		return
 	}
@@ -151,11 +162,11 @@ func (h *Handlers) CancelAgentRequest(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/agents/live", render.ViewData{Flash: "Request cancelled.", Data: map[string]any{"Agent": page}})
 }
 func (h *Handlers) AnswerQuestion(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
-	qid, ok := pathID(w, r, "toolUseID")
+	qid, ok := h.pathID(w, r, "toolUseID")
 	if !ok {
 		return
 	}
@@ -169,11 +180,11 @@ func (h *Handlers) AnswerQuestion(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/agents/pending", render.ViewData{Flash: flash, Data: map[string]any{"Agent": page}})
 }
 func (h *Handlers) DismissQuestion(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
-	qid, ok := pathID(w, r, "toolUseID")
+	qid, ok := h.pathID(w, r, "toolUseID")
 	if !ok {
 		return
 	}
@@ -181,15 +192,12 @@ func (h *Handlers) DismissQuestion(w http.ResponseWriter, r *http.Request) {
 	page, _ := h.service.AgentPage(r.Context(), id)
 	h.renderer.HTML(w, 200, "partials/agents/pending", render.ViewData{Flash: "Question dismissed.", Data: map[string]any{"Agent": page}})
 }
-func (h *Handlers) PlanApproval(w http.ResponseWriter, r *http.Request) {
-	h.renderer.HTML(w, 200, "partials/agents/pending", render.ViewData{Flash: "Plan decision recorded."})
-}
 func (h *Handlers) Permission(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
-	rid, ok := pathID(w, r, "requestID")
+	rid, ok := h.pathID(w, r, "requestID")
 	if !ok {
 		return
 	}
@@ -203,7 +211,7 @@ func (h *Handlers) Permission(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/agents/pending", render.ViewData{Flash: flash, Data: map[string]any{"Agent": page}})
 }
 func (h *Handlers) Feedback(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
@@ -219,60 +227,85 @@ func (h *Handlers) Feedback(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) Store(w http.ResponseWriter, r *http.Request) {
 	apps, err := h.service.ListStoreApps(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("filter"))
 	if err != nil {
-		http.Error(w, "store", 500)
+		h.errorPage(w, r, 500, "Couldn't load the store.")
 		return
 	}
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Store · oozie", Content: "pages/store/index-content", Data: map[string]any{"Apps": apps}})
+	h.page(w, r, "Store · oozie", "pages/store/index-content", map[string]any{"Apps": apps})
 }
 func (h *Handlers) StoreResults(w http.ResponseWriter, r *http.Request) {
 	apps, _ := h.service.ListStoreApps(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("filter"))
 	h.renderer.HTML(w, 200, "partials/store/list", render.ViewData{Data: map[string]any{"Apps": apps}})
 }
 func (h *Handlers) StoreApp(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
 	app, err := h.service.GetStoreApp(r.Context(), id)
 	if err != nil {
-		http.NotFound(w, r)
+		h.errorPage(w, r, 404, "App not found in the store.")
 		return
 	}
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: app.Name + " · Store", Content: "pages/store/show-content", Data: map[string]any{"App": app}})
+	h.page(w, r, app.Name+" · Store", "pages/store/show-content", map[string]any{"App": app})
 }
 func (h *Handlers) InstallApp(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
-	_ = h.service.InstallApp(r.Context(), id)
+	err := h.service.InstallApp(r.Context(), id)
+	flash := "App installed to ~/Applications."
+	if err != nil {
+		flash = err.Error()
+	}
 	app, _ := h.service.GetStoreApp(r.Context(), id)
-	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: "App installed.", Data: map[string]any{"App": app}})
+	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: flash, Data: map[string]any{"App": app}})
+}
+func (h *Handlers) OpenApp(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	err := h.service.OpenApp(r.Context(), id)
+	flash := "App opened."
+	if err != nil {
+		flash = err.Error()
+	}
+	app, _ := h.service.GetStoreApp(r.Context(), id)
+	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: flash, Data: map[string]any{"App": app}})
 }
 func (h *Handlers) InstalledApps(w http.ResponseWriter, r *http.Request) {
 	apps, _ := h.service.InstalledApps(r.Context())
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Installed Apps · oozie", Content: "pages/store/installed-content", Data: map[string]any{"Apps": apps}})
+	h.page(w, r, "Installed Apps · oozie", "pages/store/installed-content", map[string]any{"Apps": apps})
 }
 
 func (h *Handlers) PublishingJobs(w http.ResponseWriter, r *http.Request) {
 	jobs, _ := h.service.ListJobs(r.Context(), r.URL.Query().Get("status"))
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Publishing Jobs · oozie", Content: "pages/publishing/index-content", Data: map[string]any{"Jobs": jobs}})
+	h.page(w, r, "Publishing Jobs · oozie", "pages/publishing/index-content", map[string]any{"Jobs": jobs, "Active": jobsActive(jobs)})
 }
 func (h *Handlers) PublishingJobsList(w http.ResponseWriter, r *http.Request) {
 	jobs, _ := h.service.ListJobs(r.Context(), r.URL.Query().Get("status"))
-	h.renderer.HTML(w, 200, "partials/publishing/list", render.ViewData{Data: map[string]any{"Jobs": jobs}})
+	h.renderer.HTML(w, 200, "partials/publishing/list", render.ViewData{Data: map[string]any{"Jobs": jobs, "Active": jobsActive(jobs)}})
+}
+func jobsActive(jobs []PublishingJob) bool {
+	for _, j := range jobs {
+		if j.Status == "queued" || j.Status == "running" {
+			return true
+		}
+	}
+	return false
 }
 func (h *Handlers) PublishPage(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
 	p, _ := h.service.GetProject(r.Context(), id)
 	d, _ := h.service.GetDraft(r.Context(), id)
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Publish · " + p.Name, Content: "pages/publishing/show-content", Data: map[string]any{"Project": p, "Draft": d}})
+	h.page(w, r, "Publish · "+p.Name, "pages/publishing/show-content", map[string]any{"Project": p, "Draft": d})
 }
 func (h *Handlers) SaveDraft(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
@@ -286,46 +319,36 @@ func (h *Handlers) SaveDraft(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/publishing/form", render.ViewData{Flash: "Draft saved.", Data: map[string]any{"Draft": d}})
 }
 func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := h.pathID(w, r, "id")
 	if !ok {
 		return
 	}
-	_ = h.service.Publish(r.Context(), id)
+	err := h.service.Publish(r.Context(), id)
+	flash := "Publishing started — building your app…"
+	if err != nil {
+		flash = err.Error()
+	}
 	jobs, _ := h.service.ListJobs(r.Context(), "")
-	h.renderer.HTML(w, 200, "partials/publishing/list", render.ViewData{Flash: "Publish succeeded.", Data: map[string]any{"Jobs": jobs}})
+	h.renderer.HTML(w, 200, "partials/publishing/list", render.ViewData{Flash: flash, Data: map[string]any{"Jobs": jobs, "Active": jobsActive(jobs)}})
 }
 
 func (h *Handlers) Settings(w http.ResponseWriter, r *http.Request) {
 	s, _ := h.service.GetSettings(r.Context())
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Settings · oozie", Content: "pages/settings/index-content", Data: map[string]any{"Settings": s, "Section": "general"}})
-}
-func (h *Handlers) SettingsAppearance(w http.ResponseWriter, r *http.Request) {
-	s, _ := h.service.GetSettings(r.Context())
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Appearance · oozie", Content: "pages/settings/index-content", Data: map[string]any{"Settings": s, "Section": "appearance"}})
-}
-func (h *Handlers) SettingsAgent(w http.ResponseWriter, r *http.Request) {
-	s, _ := h.service.GetSettings(r.Context())
-	h.renderer.HTML(w, 200, "layouts/base", render.ViewData{Title: "Agent · oozie", Content: "pages/settings/index-content", Data: map[string]any{"Settings": s, "Section": "agent"}})
+	h.page(w, r, "Settings · oozie", "pages/settings/index-content", map[string]any{"Settings": s})
 }
 func (h *Handlers) SaveSettings(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
-	s := Settings{Appearance: r.FormValue("appearance"), StyleProfile: r.FormValue("style_profile"), AgentShortcut: r.FormValue("agent_shortcut"), SendMessageShortcut: r.FormValue("send_message_shortcut")}
+	s := Settings{Appearance: r.FormValue("appearance"), StyleProfile: r.FormValue("style_profile")}
 	_ = h.service.SaveSettings(r.Context(), s)
 	h.renderer.HTML(w, 200, "partials/settings/form", render.ViewData{Flash: "Settings saved.", Data: map[string]any{"Settings": s}})
 }
 
-func pathID(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
+func (h *Handlers) pathID(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
 	if err != nil || id < 1 {
-		http.Error(w, "invalid id", 400)
+		h.errorPage(w, r, 400, "That ID isn't valid.")
 		return 0, false
 	}
 	return id, true
 }
 func isHTMX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
-func ignoreNotFound(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	return err
-}

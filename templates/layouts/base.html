@@ -1,12 +1,12 @@
 {{define "layouts/base"}}
 <!doctype html>
-<html lang="en" data-theme="system">
+<html lang="en" data-theme="{{with .Theme}}{{.}}{{else}}system{{end}}" data-style="{{with .Style}}{{.}}{{else}}graphite{{end}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}}</title>
   <link rel="stylesheet" href="/static/css/app.css?v={{cssVersion}}">
-  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js"></script>
+  <script src="/static/js/htmx.min.js"></script>
 </head>
 <body>
   <div class="app-frame">
@@ -21,7 +21,7 @@
       </nav>
       <div class="sidebar-card">
         <span class="label">Local mode</span>
-        <p>No sign-in. Stubbed AI, publishing, and installs for solo building.</p>
+        <p>Runs entirely on your Mac. Your local pi agent builds each project; Publish packages it into a .app; Install puts it in ~/Applications.</p>
       </div>
     </aside>
     <main class="main-panel" id="main-panel">

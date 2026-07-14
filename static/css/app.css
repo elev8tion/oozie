@@ -131,3 +131,15 @@ td.row-actions{flex-wrap:nowrap;justify-content:flex-end;white-space:nowrap;gap:
 .composer-foot .model-picker{display:flex;flex-direction:row;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto}
 .composer-foot .model-picker select{height:30px;padding:0 8px;width:auto}
 .composer-foot button.primary{margin-left:auto}
+
+/* ============================================================
+   Explicit theme overrides — the saved Theme setting wins over
+   the OS preference. data-theme="system" keeps the media query.
+   ============================================================ */
+:root[data-theme="light"]{color-scheme:light;--bg:#eef0f4;--panel:#ffffff;--panel2:#f7f8fb;--text:#1f2430;--muted:#697081;--line:#d8dde7;--accent:#2f6fed;--shadow:0 18px 50px rgba(18,24,40,.10);--accent-contrast:#fff}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#121419;--panel:#1b1e25;--panel2:#232833;--text:#eef2f8;--muted:#9aa3b2;--line:#303644;--accent:#7aa2ff;--shadow:0 18px 50px rgba(0,0,0,.35);--accent-contrast:#0e1524}
+
+/* Accent styles — the saved Style setting recolors the accent. */
+:root[data-style="blueprint"]{--accent:#3b82f6}
+:root[data-style="warm"]{--accent:#c2703d}
+:root[data-theme="dark"][data-style="warm"]{--accent:#e8a06a;--accent-contrast:#241203}

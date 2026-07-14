@@ -2,9 +2,19 @@
 {{$s := index .Data "Settings"}}
 {{if .Flash}}<div class="notice good">{{.Flash}}</div>{{end}}
 <form class="panel form-stack" hx-post="/settings" hx-target="#settings-panel">
-  <fieldset><legend>General</legend><label>Display name<input value="Solo Builder" disabled></label><p class="muted">No sign-up or auth; oozie runs as a solo local workspace.</p></fieldset>
-  <fieldset><legend>Appearance</legend><label>Theme<select name="appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label>Style profile<select name="style_profile"><option value="graphite">Graphite</option><option value="blueprint">Blueprint</option><option value="warm">Warm Mono</option></select></label></fieldset>
-  <fieldset><legend>Agent</legend><label>Agent shortcut<input name="agent_shortcut" value="{{$s.AgentShortcut}}"></label><label>Send message shortcut<input name="send_message_shortcut" value="{{$s.SendMessageShortcut}}"></label></fieldset>
+  <fieldset><legend>Appearance</legend>
+    <label>Theme<select name="appearance">
+      <option value="system"{{if eq $s.Appearance "system"}} selected{{end}}>System</option>
+      <option value="light"{{if eq $s.Appearance "light"}} selected{{end}}>Light</option>
+      <option value="dark"{{if eq $s.Appearance "dark"}} selected{{end}}>Dark</option>
+    </select></label>
+    <label>Accent style<select name="style_profile">
+      <option value="graphite"{{if eq $s.StyleProfile "graphite"}} selected{{end}}>Graphite</option>
+      <option value="blueprint"{{if eq $s.StyleProfile "blueprint"}} selected{{end}}>Blueprint</option>
+      <option value="warm"{{if eq $s.StyleProfile "warm"}} selected{{end}}>Warm</option>
+    </select></label>
+    <p class="muted">Runs as a solo local workspace — no sign-in, no accounts.</p>
+  </fieldset>
   <button class="button primary">Save settings</button>
 </form>
 {{end}}

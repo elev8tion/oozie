@@ -1,22 +1,20 @@
 package app
 
 import (
+	"log"
 	"net/http"
+	"runtime/debug"
+	"time"
 
-	"oozie/internal/agent/pi"
 	"oozie/internal/domain/projects"
 )
 
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
 
-	repo := projects.NewRepo(a.database)
-	service := projects.NewService(repo)
-	catalog := pi.LoadCatalog()
-	service.SetAgent(pi.NewManager(catalog, service), catalog)
-	h := projects.NewHandlers(service, a.renderer)
+	h := projects.NewHandlers(a.service, a.renderer)
 
-	static := http.StripPrefix("/static/", http.FileServer(http.Dir("static")))
+	static := http.StripPrefix("/static/", http.FileServerFS(a.static))
 	mux.Handle("GET /static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		static.ServeHTTP(w, r)
@@ -38,13 +36,13 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /projects/{id}/agent/requests/{requestID}/cancel", h.CancelAgentRequest)
 	mux.HandleFunc("POST /projects/{id}/agent/questions/{toolUseID}/answer", h.AnswerQuestion)
 	mux.HandleFunc("POST /projects/{id}/agent/questions/{toolUseID}/dismiss", h.DismissQuestion)
-	mux.HandleFunc("POST /projects/{id}/agent/plan-approvals/{requestID}", h.PlanApproval)
 	mux.HandleFunc("POST /projects/{id}/agent/permissions/{requestID}", h.Permission)
 	mux.HandleFunc("POST /projects/{id}/feedback", h.Feedback)
 
 	mux.HandleFunc("GET /store", h.Store)
 	mux.HandleFunc("GET /store/apps/{id}", h.StoreApp)
 	mux.HandleFunc("POST /store/apps/{id}/install", h.InstallApp)
+	mux.HandleFunc("POST /store/apps/{id}/open", h.OpenApp)
 	mux.HandleFunc("GET /installed-apps", h.InstalledApps)
 	mux.HandleFunc("GET /fragments/store/results", h.StoreResults)
 
@@ -55,9 +53,44 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /projects/{id}/publish", h.Publish)
 
 	mux.HandleFunc("GET /settings", h.Settings)
-	mux.HandleFunc("GET /settings/appearance", h.SettingsAppearance)
-	mux.HandleFunc("GET /settings/agent", h.SettingsAgent)
 	mux.HandleFunc("POST /settings", h.SaveSettings)
 
-	return mux
+	return withRecovery(withLogging(mux))
+}
+
+// withRecovery converts handler panics into a logged 500 instead of a
+// dropped connection.
+func withRecovery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("panic on %s %s: %v\n%s", r.Method, r.URL.Path, rec, debug.Stack())
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func withLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/static/" || len(r.URL.Path) > 8 && r.URL.Path[:8] == "/static/" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(rec, r)
+		log.Printf("%d %s %s (%s)", rec.status, r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
+	})
 }

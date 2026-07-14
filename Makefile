@@ -13,9 +13,9 @@ build:
 app:
 	sh scripts/make-app.sh
 
-# Build and install oozie.app into ~/Applications.
+# Build and install oozie.app into /Applications.
 install-app: app
-	mkdir -p ~/Applications
-	rm -rf ~/Applications/oozie.app
-	ditto dist/oozie.app ~/Applications/oozie.app
-	@echo "installed ~/Applications/oozie.app"
+	mkdir -p /Applications
+	rm -rf /Applications/oozie.app ~/Applications/oozie.app
+	ditto dist/oozie.app /Applications/oozie.app
+	@echo "installed /Applications/oozie.app"

@@ -838,6 +838,11 @@ func (s *Service) InstallApp(ctx context.Context, id int64) error {
 	if err := os.RemoveAll(dest); err != nil {
 		return err
 	}
+	// Clear a stale copy in the legacy location so reinstalls don't leave
+	// two versions on disk.
+	if legacy, err := legacyInstalledAppPath(app); err == nil && legacy != dest {
+		_ = os.RemoveAll(legacy)
+	}
 	if out, err := exec.CommandContext(ctx, "ditto", app.ArtifactPath, dest).CombinedOutput(); err != nil {
 		return ErrValidation{"Install failed: " + strings.TrimSpace(string(out))}
 	}
@@ -853,12 +858,9 @@ func (s *Service) OpenApp(ctx context.Context, id int64) error {
 	if app.ArtifactPath == "" {
 		return ErrValidation{"This app has no built artifact. Publish its project first."}
 	}
-	dest, err := installedAppPath(app)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(dest); err != nil {
-		return ErrValidation{"App not found in ~/Applications — install it first."}
+	dest := findInstalledApp(app)
+	if dest == "" {
+		return ErrValidation{"App not found in Applications — install it first."}
 	}
 	if out, err := exec.CommandContext(ctx, "open", dest).CombinedOutput(); err != nil {
 		return ErrValidation{"Open failed: " + strings.TrimSpace(string(out))}
@@ -874,12 +876,10 @@ func (s *Service) UninstallApp(ctx context.Context, id int64) error {
 		return err
 	}
 	if app.ArtifactPath != "" {
-		dest, err := installedAppPath(app)
-		if err != nil {
-			return err
-		}
-		if err := os.RemoveAll(dest); err != nil {
-			return ErrValidation{"Could not remove the installed app: " + err.Error()}
+		for dest := findInstalledApp(app); dest != ""; dest = findInstalledApp(app) {
+			if err := os.RemoveAll(dest); err != nil {
+				return ErrValidation{"Could not remove the installed app: " + err.Error()}
+			}
 		}
 	}
 	return s.repo.UninstallApp(ctx, id)
@@ -896,10 +896,39 @@ func (s *Service) RemoveStoreApp(ctx context.Context, id int64) error {
 }
 
 // applicationsDirOverride redirects installs (tests point it at a temp
-// dir so auto-install never touches the real ~/Applications).
+// dir so auto-install never touches the real Applications folders).
 var applicationsDirOverride string
 
+// applicationsDir prefers the system /Applications (where Spotlight,
+// Launchpad, and System Settings pickers look) and falls back to the
+// user-level ~/Applications when /Applications isn't writable.
+func applicationsDir() (string, error) {
+	if applicationsDirOverride != "" {
+		return applicationsDirOverride, nil
+	}
+	probe := filepath.Join("/Applications", ".oozie-write-probe")
+	if err := os.WriteFile(probe, nil, 0o644); err == nil {
+		_ = os.Remove(probe)
+		return "/Applications", nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Applications"), nil
+}
+
 func installedAppPath(app StoreApp) (string, error) {
+	dir, err := applicationsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, filepath.Base(app.ArtifactPath)), nil
+}
+
+// legacyInstalledAppPath is where installs used to land (~/Applications);
+// open/uninstall keep working for apps installed before the move.
+func legacyInstalledAppPath(app StoreApp) (string, error) {
 	if applicationsDirOverride != "" {
 		return filepath.Join(applicationsDirOverride, filepath.Base(app.ArtifactPath)), nil
 	}
@@ -908,6 +937,22 @@ func installedAppPath(app StoreApp) (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, "Applications", filepath.Base(app.ArtifactPath)), nil
+}
+
+// findInstalledApp returns the existing installed bundle, preferring the
+// current location, then the legacy one. Empty string when not on disk.
+func findInstalledApp(app StoreApp) string {
+	if p, err := installedAppPath(app); err == nil {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if p, err := legacyInstalledAppPath(app); err == nil {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 func (s *Service) InstalledApps(ctx context.Context) ([]StoreApp, error) {

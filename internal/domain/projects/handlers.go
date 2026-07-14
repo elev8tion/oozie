@@ -316,7 +316,7 @@ func (h *Handlers) InstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.service.InstallApp(r.Context(), id)
-	flash, errMsg := "App installed to ~/Applications.", ""
+	flash, errMsg := "App installed to /Applications.", ""
 	if err != nil {
 		flash, errMsg = "", err.Error()
 	}
@@ -329,7 +329,7 @@ func (h *Handlers) UninstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.service.UninstallApp(r.Context(), id)
-	flash, errMsg := "App uninstalled from ~/Applications.", ""
+	flash, errMsg := "App uninstalled from /Applications.", ""
 	if err != nil {
 		flash, errMsg = "", err.Error()
 	}

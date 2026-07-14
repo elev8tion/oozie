@@ -5,7 +5,7 @@
   <h1>{{$app.Name}}</h1>
   {{if index .Data "Sent"}}
   <p class="lead">On it. The agent is working on your request now.</p>
-  <p class="muted">When it finishes, oozie rebuilds {{$app.Name}} and{{if $app.Installed}} refreshes the copy in ~/Applications{{else}} updates the store listing{{end}} automatically — nothing else to do. You can watch the work live on the project's agent page.</p>
+  <p class="muted">When it finishes, oozie rebuilds {{$app.Name}} and{{if $app.Installed}} refreshes the copy in /Applications{{else}} updates the store listing{{end}} automatically — nothing else to do. You can watch the work live on the project's agent page.</p>
   <div class="actions">{{if $app.ProjectID}}<a class="button primary" href="/projects/{{$app.ProjectID}}/agent">Watch the agent</a>{{end}}<a class="button" href="/store/apps/{{$app.ID}}">Back to the store</a></div>
   {{else}}
   <p class="muted">Tell the agent what should be better. It patches the app, and oozie republishes{{if $app.Installed}} and reinstalls{{end}} it automatically.</p>

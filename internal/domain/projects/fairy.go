@@ -44,7 +44,7 @@ func (s *Service) BuildWish(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	// Auto-install so overnight prototypes are in ~/Applications by morning.
+	// Auto-install so overnight prototypes are in /Applications by morning.
 	draft := PublishDraft{ProjectID: project.ID, AppName: name, Headline: wishHeadline(wish.Text), Description: wish.Text, PublishTarget: "public", Visibility: "unlisted", ScreenshotManifest: "[]", AutoInstall: true}
 	if err := s.repo.SaveDraft(ctx, draft); err != nil {
 		return err

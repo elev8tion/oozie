@@ -1,13 +1,13 @@
 # oozie
 
-A Mac app for building mini Mac apps. oozie runs entirely on your machine: you describe an app, your local **pi** agent builds it in a real project directory, and oozie's publish pipeline compiles it into a `.app` bundle you can install into `~/Applications` and launch from your Dock.
+A Mac app for building mini Mac apps. oozie runs entirely on your machine: you describe an app, your local **pi** agent builds it in a real project directory, and oozie's publish pipeline compiles it into a `.app` bundle you can install into `/Applications` and launch from your Dock.
 
 ## The loop
 
 1. **Create a project** — pick a name and directory; mark it Trusted (agent works freely) or untrusted (every write/edit/bash call needs your approval in the permission panel).
 2. **Talk to the agent** — Plan mode for a proposal, Build mode to implement. The agent runs your local `pi` instance (`pi --mode rpc`) in the project directory with a persistent session, so context survives restarts. The model picker mirrors your terminal pi's `enabledModels`.
 3. **Publish** — hit Publish (a draft is optional: blank fields fall back to sensible defaults you can polish later). A real job runs `swift build -c release` and wraps the executable in `dist/<Name>.app` (ad-hoc signed; an `icon.png`/`icon.icns` at the project root becomes the app icon); on success the app appears in your Store.
-4. **Install & open** — Install copies the bundle to `~/Applications`; Open launches it.
+4. **Install & open** — Install copies the bundle to `/Applications`; Open launches it.
 
 ## Living apps
 
@@ -37,7 +37,7 @@ Published apps aren't frozen artifacts — they stay connected to the factory:
 ```bash
 make run          # dev server on http://127.0.0.1:8080
 make app          # build dist/oozie.app (native window app)
-make install-app  # build and install oozie.app into ~/Applications
+make install-app  # build and install oozie.app into /Applications
 make test         # go test ./...
 ```
 

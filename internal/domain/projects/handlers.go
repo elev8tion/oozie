@@ -254,12 +254,12 @@ func (h *Handlers) InstallApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.service.InstallApp(r.Context(), id)
-	flash := "App installed to ~/Applications."
+	flash, errMsg := "App installed to ~/Applications.", ""
 	if err != nil {
-		flash = err.Error()
+		flash, errMsg = "", err.Error()
 	}
 	app, _ := h.service.GetStoreApp(r.Context(), id)
-	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: flash, Data: map[string]any{"App": app}})
+	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: flash, Err: errMsg, Data: map[string]any{"App": app}})
 }
 func (h *Handlers) OpenApp(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.pathID(w, r, "id")
@@ -267,12 +267,12 @@ func (h *Handlers) OpenApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.service.OpenApp(r.Context(), id)
-	flash := "App opened."
+	flash, errMsg := "App opened.", ""
 	if err != nil {
-		flash = err.Error()
+		flash, errMsg = "", err.Error()
 	}
 	app, _ := h.service.GetStoreApp(r.Context(), id)
-	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: flash, Data: map[string]any{"App": app}})
+	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: flash, Err: errMsg, Data: map[string]any{"App": app}})
 }
 func (h *Handlers) InstalledApps(w http.ResponseWriter, r *http.Request) {
 	apps, _ := h.service.InstalledApps(r.Context())
@@ -323,13 +323,27 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	err := h.service.Publish(r.Context(), id)
-	flash := "Publishing started — building your app…"
-	if err != nil {
-		flash = err.Error()
+	_ = r.ParseForm()
+	// The Publish button lives inside the draft form: save the current
+	// form values first so one click does the whole thing.
+	if r.FormValue("app_name") != "" || r.FormValue("headline") != "" || r.FormValue("description") != "" {
+		d := PublishDraft{ProjectID: id, AppName: r.FormValue("app_name"), Headline: r.FormValue("headline"), Description: r.FormValue("description"), Changelog: r.FormValue("changelog"), PublishTarget: r.FormValue("publish_target"), Visibility: r.FormValue("visibility"), ScreenshotManifest: r.FormValue("screenshot_manifest")}
+		if err := h.service.SaveDraft(r.Context(), d); err != nil {
+			h.renderJobs(w, r, "", err.Error())
+			return
+		}
 	}
+	err := h.service.Publish(r.Context(), id)
+	if err != nil {
+		h.renderJobs(w, r, "", err.Error())
+		return
+	}
+	h.renderJobs(w, r, "Publishing started — building your app…", "")
+}
+
+func (h *Handlers) renderJobs(w http.ResponseWriter, r *http.Request, flash, errMsg string) {
 	jobs, _ := h.service.ListJobs(r.Context(), "")
-	h.renderer.HTML(w, 200, "partials/publishing/list", render.ViewData{Flash: flash, Data: map[string]any{"Jobs": jobs, "Active": jobsActive(jobs)}})
+	h.renderer.HTML(w, 200, "partials/publishing/list", render.ViewData{Flash: flash, Err: errMsg, Data: map[string]any{"Jobs": jobs, "Active": jobsActive(jobs)}})
 }
 
 func (h *Handlers) Settings(w http.ResponseWriter, r *http.Request) {

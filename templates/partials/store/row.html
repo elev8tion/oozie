@@ -1,4 +1,5 @@
 {{define "partials/store/row"}}
+{{if .Err}}<div class="notice error">{{.Err}}</div>{{end}}
 {{$app := index .Data "App"}}
 <article class="store-card" id="store-app-{{$app.ID}}"><header><h2><a href="/store/apps/{{$app.ID}}">{{$app.Name}}</a></h2><div class="badges"><span class="badge">{{$app.Visibility}}</span>{{if $app.Featured}}<span class="badge good">featured</span>{{end}}{{if $app.Installed}}<span class="badge good">installed</span>{{end}}</div></header><p class="strong">{{$app.Headline}}</p><p class="muted">{{$app.Description}}</p><footer><span>{{$app.PublishedVersion}}</span><div class="actions">{{if $app.Installed}}<form hx-post="/store/apps/{{$app.ID}}/open" hx-target="#store-app-{{$app.ID}}" hx-swap="outerHTML"><button class="button primary">Open</button></form><form hx-post="/store/apps/{{$app.ID}}/install" hx-target="#store-app-{{$app.ID}}" hx-swap="outerHTML"><button class="button">Reinstall</button></form>{{else}}<form hx-post="/store/apps/{{$app.ID}}/install" hx-target="#store-app-{{$app.ID}}" hx-swap="outerHTML"><button class="button primary">Install</button></form>{{end}}</div></footer></article>
 {{end}}

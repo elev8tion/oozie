@@ -23,7 +23,11 @@ import (
 func main() {
 	cfg := app.LoadConfig()
 
-	migrateLegacyDatabase(cfg.DatabasePath)
+	// Only auto-migrate the old repo-local database into the default
+	// location; an explicit DATABASE_PATH means the caller chose a home.
+	if os.Getenv("DATABASE_PATH") == "" {
+		migrateLegacyDatabase(cfg.DatabasePath)
+	}
 
 	database, err := db.Open(cfg.DatabasePath)
 	if err != nil {

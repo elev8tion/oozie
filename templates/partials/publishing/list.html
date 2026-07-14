@@ -1,5 +1,5 @@
 {{define "partials/publishing/list"}}
-{{if .Flash}}<div class="notice good">{{.Flash}}</div>{{end}}
+{{if .Err}}<div class="notice error">{{.Err}}</div>{{else if .Flash}}<div class="notice good">{{.Flash}}</div>{{end}}
 <div class="panel table-panel">
 {{with index .Data "Jobs"}}
 <table><thead><tr><th>ID</th><th>Project</th><th>Status</th><th>Error</th><th>Updated</th></tr></thead><tbody>{{range .}}{{template "partials/publishing/row" dict "Data" (dict "Job" .)}}{{end}}</tbody></table>

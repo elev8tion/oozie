@@ -20,8 +20,13 @@ mv /tmp/oozie-server "$MACOS/oozie-server"
 # Native window shell.
 swiftc -O scripts/OozieApp.swift -o "$MACOS/oozie"
 
-# App icon: render PNG, then convert to icns.
-swift scripts/make-icon.swift dist/icon.png
+# App icon: use the checked-in Apple Intelligence icon; fall back to the
+# programmatic one if it's ever missing.
+if [ -f assets/icon.png ]; then
+  cp assets/icon.png dist/icon.png
+else
+  swift scripts/make-icon.swift dist/icon.png
+fi
 ICONSET="dist/AppIcon.iconset"
 rm -rf "$ICONSET"; mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do

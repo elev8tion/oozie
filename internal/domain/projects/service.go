@@ -500,6 +500,35 @@ func (s *Service) OpenApp(ctx context.Context, id int64) error {
 	return nil
 }
 
+// UninstallApp removes the app from ~/Applications but keeps it in the
+// store so it can be reinstalled.
+func (s *Service) UninstallApp(ctx context.Context, id int64) error {
+	app, err := s.repo.GetStoreApp(ctx, id)
+	if err != nil {
+		return err
+	}
+	if app.ArtifactPath != "" {
+		dest, err := installedAppPath(app)
+		if err != nil {
+			return err
+		}
+		if err := os.RemoveAll(dest); err != nil {
+			return ErrValidation{"Could not remove the installed app: " + err.Error()}
+		}
+	}
+	return s.repo.UninstallApp(ctx, id)
+}
+
+// RemoveStoreApp uninstalls the app and deletes its store listing. The
+// project and its build artifacts are untouched — republishing brings the
+// app back.
+func (s *Service) RemoveStoreApp(ctx context.Context, id int64) error {
+	if err := s.UninstallApp(ctx, id); err != nil {
+		return err
+	}
+	return s.repo.DeleteStoreApp(ctx, id)
+}
+
 func installedAppPath(app StoreApp) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

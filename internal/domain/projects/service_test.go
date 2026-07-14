@@ -133,6 +133,34 @@ func TestPublishFailureRecordsError(t *testing.T) {
 	}
 }
 
+func TestUninstallAndRemoveStoreApp(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	p, _ := s.CreateProject(ctx, "Gone Soon", filepath.Join(t.TempDir(), "g"), true)
+	id, err := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Gone Soon", Headline: "h", Description: "d"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.repo.InstallApp(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.UninstallApp(ctx, id); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	app, _ := s.repo.GetStoreApp(ctx, id)
+	if app.Installed || app.InstallCount != 0 {
+		t.Errorf("after uninstall: installed=%v count=%d", app.Installed, app.InstallCount)
+	}
+
+	if err := s.RemoveStoreApp(ctx, id); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if apps, _ := s.ListStoreApps(ctx, "", ""); len(apps) != 0 {
+		t.Errorf("store should be empty after remove, has %d", len(apps))
+	}
+}
+
 func TestInstallRequiresArtifact(t *testing.T) {
 	ctx := context.Background()
 	s := newTestService(t)

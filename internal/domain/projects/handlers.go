@@ -261,6 +261,32 @@ func (h *Handlers) InstallApp(w http.ResponseWriter, r *http.Request) {
 	app, _ := h.service.GetStoreApp(r.Context(), id)
 	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: flash, Err: errMsg, Data: map[string]any{"App": app}})
 }
+func (h *Handlers) UninstallApp(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	err := h.service.UninstallApp(r.Context(), id)
+	flash, errMsg := "App uninstalled from ~/Applications.", ""
+	if err != nil {
+		flash, errMsg = "", err.Error()
+	}
+	app, _ := h.service.GetStoreApp(r.Context(), id)
+	h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Flash: flash, Err: errMsg, Data: map[string]any{"App": app}})
+}
+func (h *Handlers) RemoveStoreApp(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	err := h.service.RemoveStoreApp(r.Context(), id)
+	if err != nil {
+		app, _ := h.service.GetStoreApp(r.Context(), id)
+		h.renderer.HTML(w, 200, "partials/store/row", render.ViewData{Err: err.Error(), Data: map[string]any{"App": app}})
+		return
+	}
+	h.renderer.HTML(w, 200, "partials/store/flash", render.ViewData{Flash: "App removed from your store. Republish the project to bring it back."})
+}
 func (h *Handlers) OpenApp(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.pathID(w, r, "id")
 	if !ok {

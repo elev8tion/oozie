@@ -388,6 +388,20 @@ func scanStoreApp(row rowScanner) (StoreApp, error) {
 	}
 	return s, nil
 }
+func (r *Repo) UninstallApp(ctx context.Context, id int64) error {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM installed_apps WHERE store_app_id=?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		_, _ = r.db.ExecContext(ctx, `UPDATE store_apps SET install_count=MAX(install_count-1,0) WHERE id=?`, id)
+	}
+	return nil
+}
+func (r *Repo) DeleteStoreApp(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM store_apps WHERE id=?`, id)
+	return err
+}
 func (r *Repo) InstallApp(ctx context.Context, id int64) error {
 	res, err := r.db.ExecContext(ctx, `INSERT OR IGNORE INTO installed_apps (store_app_id,user_id) VALUES (?,1)`, id)
 	if err != nil {

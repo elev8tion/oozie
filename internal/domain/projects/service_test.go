@@ -491,3 +491,24 @@ func TestTasteAccumulatesSignals(t *testing.T) {
 		t.Fatalf("taste not materialized: %v", err)
 	}
 }
+
+// TestStalePromptsSweptAtStartup: prompts left pending by a dead process
+// are expired by the startup sweep so they can't wedge the agent page.
+func TestStalePromptsSweptAtStartup(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	p, _ := s.CreateProject(ctx, "Stuck", filepath.Join(t.TempDir(), "s"), false)
+	session, _ := s.repo.GetSession(ctx, p.ID)
+	reqID, _ := s.repo.CreateAgentRequest(ctx, session.ID, "build", "do things")
+	_ = s.repo.InsertPermission(ctx, p.ID, reqID, "rpc-1", "bash", "run a build")
+	_ = s.repo.InsertQuestion(ctx, p.ID, reqID, "rpc-2", "Which color?", "[]")
+
+	s.RecoverOrphanedJobs(ctx)
+
+	if perm, _ := s.repo.PendingPermission(ctx, p.ID); perm != nil {
+		t.Fatalf("stale permission survived the sweep: %+v", perm)
+	}
+	if q, _ := s.repo.PendingQuestion(ctx, p.ID); q != nil {
+		t.Fatalf("stale question survived the sweep: %+v", q)
+	}
+}

@@ -4,11 +4,12 @@
 import AppKit
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate, WKDownloadDelegate {
 	var window: NSWindow!
 	var webView: WKWebView!
 	var server: Process?
 	var port: UInt16 = 0
+	var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		port = Self.freePort()
@@ -77,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
 		let config = WKWebViewConfiguration()
 		webView = WKWebView(frame: .zero, configuration: config)
 		webView.uiDelegate = self
+		webView.navigationDelegate = self
 		webView.allowsMagnification = true
 
 		window = NSWindow(
@@ -110,6 +112,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate {
 			}
 		}
 		task.resume()
+	}
+
+	// MARK: file picker (<input type="file"> — WKWebView shows nothing
+	// without this delegate method)
+
+	func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+	             initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+		let panel = NSOpenPanel()
+		panel.canChooseFiles = true
+		panel.canChooseDirectories = parameters.allowsDirectories
+		panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+		panel.beginSheetModal(for: window) { response in
+			completionHandler(response == .OK ? panel.urls : nil)
+		}
+	}
+
+	// MARK: downloads (Content-Disposition: attachment — WKWebView drops
+	// these silently without a download delegate)
+
+	func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+	             decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+		if let http = navigationResponse.response as? HTTPURLResponse,
+		   let disposition = http.value(forHTTPHeaderField: "Content-Disposition"),
+		   disposition.lowercased().contains("attachment") {
+			decisionHandler(.download)
+			return
+		}
+		if !navigationResponse.canShowMIMEType {
+			decisionHandler(.download)
+			return
+		}
+		decisionHandler(.allow)
+	}
+
+	func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+		download.delegate = self
+	}
+
+	func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+	              suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+		let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+		var dest = downloads.appendingPathComponent(suggestedFilename)
+		let base = dest.deletingPathExtension().lastPathComponent
+		let ext = dest.pathExtension
+		var n = 2
+		while FileManager.default.fileExists(atPath: dest.path) {
+			dest = downloads.appendingPathComponent("\(base) \(n)")
+			if !ext.isEmpty { dest = dest.appendingPathExtension(ext) }
+			n += 1
+		}
+		downloadDestinations[ObjectIdentifier(download)] = dest
+		completionHandler(dest)
+	}
+
+	func downloadDidFinish(_ download: WKDownload) {
+		if let dest = downloadDestinations.removeValue(forKey: ObjectIdentifier(download)) {
+			NSWorkspace.shared.activateFileViewerSelecting([dest])
+		}
+	}
+
+	func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+		downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
+		let alert = NSAlert()
+		alert.messageText = "Download failed: \(error.localizedDescription)"
+		alert.runModal()
 	}
 
 	// MARK: JS dialogs (hx-confirm and friends)

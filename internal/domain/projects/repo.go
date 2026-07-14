@@ -595,6 +595,17 @@ func (r *Repo) SettleWish(ctx context.Context, id int64, status, errMsg string) 
 	return err
 }
 
+// SweepStalePrompts expires questions and permission requests left
+// pending by a dead process: no pi process survives a restart, so any
+// pending prompt at startup can never be answered.
+func (r *Repo) SweepStalePrompts(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, `UPDATE agent_pending_questions SET status='expired' WHERE status='pending'`); err != nil {
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE agent_permission_requests SET status='expired' WHERE status='pending'`)
+	return err
+}
+
 // SweepStaleWishes fails wishes left 'building' by a dead process.
 func (r *Repo) SweepStaleWishes(ctx context.Context) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE wishes SET status='failed', error='oozie quit while this wish was building — set it back to pending or build it now' WHERE status='building'`)

@@ -113,6 +113,9 @@ func (s *Service) RecoverOrphanedJobs(ctx context.Context) {
 	if err := s.repo.SweepStaleWishes(ctx); err != nil {
 		log.Printf("sweep stale wishes: %v", err)
 	}
+	if err := s.repo.SweepStalePrompts(ctx); err != nil {
+		log.Printf("sweep stale prompts: %v", err)
+	}
 }
 
 // SetAgent wires the pi RPC manager after construction (the manager's
@@ -294,7 +297,10 @@ func (s *Service) AnswerQuestion(ctx context.Context, id int64, answer string) e
 	}
 	if q.RPCID != "" && s.agent != nil {
 		if err := s.agent.RespondValue(q.ProjectID, q.RPCID, answer); err != nil {
-			return ErrValidation{err.Error()}
+			// The asking process is gone (crash/quit). Clear the stale
+			// prompt instead of wedging the panel forever.
+			_ = s.repo.ResolveQuestion(ctx, id, "expired")
+			return ErrValidation{"That question came from an agent run that has ended — cleared it. Send your message again."}
 		}
 	}
 	return s.repo.ResolveQuestion(ctx, id, "answered")
@@ -316,7 +322,10 @@ func (s *Service) ResolvePermission(ctx context.Context, id int64, approved bool
 	}
 	if p.RPCID != "" && s.agent != nil {
 		if err := s.agent.RespondConfirm(p.ProjectID, p.RPCID, approved); err != nil {
-			return ErrValidation{err.Error()}
+			// The asking process is gone (crash/quit). Clear the stale
+			// prompt instead of wedging the panel forever.
+			_ = s.repo.ResolvePermission(ctx, id, "expired")
+			return ErrValidation{"That permission request came from an agent run that has ended — cleared it. Send your message again."}
 		}
 	}
 	if approved {

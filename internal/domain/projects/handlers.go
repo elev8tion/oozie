@@ -224,6 +224,13 @@ func (h *Handlers) Feedback(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/projects/flash", render.ViewData{Flash: "Feedback sent."})
 }
 
+// Beacon records a launch ping from an installed app's shim. Always 204:
+// the shim never retries and must never block an app launch.
+func (h *Handlers) Beacon(w http.ResponseWriter, r *http.Request) {
+	h.service.RecordLaunch(r.Context(), r.PathValue("slug"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handlers) Store(w http.ResponseWriter, r *http.Request) {
 	apps, err := h.service.ListStoreApps(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("filter"))
 	if err != nil {

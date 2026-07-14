@@ -31,6 +31,7 @@ func New(templatesFS fs.FS, cssStamp string) (*Renderer, error) {
 		"include":    renderer.include,
 		"cssVersion": func() string { return cssStamp },
 		"ts":         humanTime,
+		"ago":        humanAgo,
 		"tokens":     humanTokens,
 	})
 	for _, pattern := range patterns {
@@ -100,6 +101,36 @@ func humanTime(t time.Time) string {
 		return "—"
 	}
 	return t.Local().Format("Jan 2, 2006 · 3:04 PM")
+}
+
+// humanAgo renders a timestamp as a compact relative duration ("2h ago").
+// Accepts time.Time or *time.Time since model timestamps come both ways.
+func humanAgo(v any) string {
+	var t time.Time
+	switch x := v.(type) {
+	case time.Time:
+		t = x
+	case *time.Time:
+		if x != nil {
+			t = *x
+		}
+	}
+	if t.IsZero() {
+		return "—"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return t.Local().Format("Jan 2, 2006")
+	}
 }
 
 func dict(values ...any) map[string]any {

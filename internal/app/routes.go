@@ -39,6 +39,11 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /projects/{id}/agent/permissions/{requestID}", h.Permission)
 	mux.HandleFunc("POST /projects/{id}/feedback", h.Feedback)
 
+	// Liveness pings from installed apps' launcher shims (GET because the
+	// shim is a one-line curl; there's no body and no auth — localhost only).
+	mux.HandleFunc("GET /api/beacon/{slug}", h.Beacon)
+	mux.HandleFunc("POST /api/beacon/{slug}", h.Beacon)
+
 	mux.HandleFunc("GET /store", h.Store)
 	mux.HandleFunc("GET /store/apps/{id}", h.StoreApp)
 	mux.HandleFunc("POST /store/apps/{id}/install", h.InstallApp)

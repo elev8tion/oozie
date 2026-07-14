@@ -16,8 +16,11 @@ import (
 )
 
 // AppBuilder produces a .app bundle for a project and returns its path.
+// beaconURL, when non-empty, is baked into a launcher shim that pings it
+// (fire-and-forget, localhost) on every launch so oozie's store can show
+// which apps are actually alive.
 type AppBuilder interface {
-	Build(workdir, appName string) (string, error)
+	Build(workdir, appName, beaconURL string) (string, error)
 }
 
 // SwiftBuilder builds Swift packages with `swift build -c release` and
@@ -26,7 +29,7 @@ type SwiftBuilder struct {
 	Timeout time.Duration // zero means 10 minutes
 }
 
-func (b SwiftBuilder) Build(workdir, appName string) (string, error) {
+func (b SwiftBuilder) Build(workdir, appName, beaconURL string) (string, error) {
 	appName = sanitizeAppName(appName)
 
 	if _, err := os.Stat(filepath.Join(workdir, "Package.swift")); err != nil {
@@ -62,13 +65,13 @@ func (b SwiftBuilder) Build(workdir, appName string) (string, error) {
 		return "", err
 	}
 
-	return assembleBundle(workdir, appName, executable)
+	return assembleBundle(workdir, appName, executable, beaconURL)
 }
 
 // assembleBundle writes dist/<AppName>.app with the executable, an app
 // icon when the project provides one, and a minimal Info.plist, then
 // ad-hoc signs the bundle. Returns the bundle's absolute path.
-func assembleBundle(workdir, appName, executable string) (string, error) {
+func assembleBundle(workdir, appName, executable, beaconURL string) (string, error) {
 	bundle := filepath.Join(workdir, "dist", appName+".app")
 	macos := filepath.Join(bundle, "Contents", "MacOS")
 	if err := os.RemoveAll(bundle); err != nil {
@@ -78,8 +81,19 @@ func assembleBundle(workdir, appName, executable string) (string, error) {
 		return "", err
 	}
 
+	// With a beacon URL the bundle's main "executable" is a two-line shim
+	// that pings oozie (localhost, 1s cap, silent when oozie is closed)
+	// and execs the real binary, renamed <name>-bin.
 	execName := filepath.Base(executable)
-	if err := copyFile(executable, filepath.Join(macos, execName), 0o755); err != nil {
+	if beaconURL != "" {
+		if err := copyFile(executable, filepath.Join(macos, execName+"-bin"), 0o755); err != nil {
+			return "", fmt.Errorf("copy executable: %w", err)
+		}
+		shim := fmt.Sprintf("#!/bin/sh\n# oozie liveness beacon — localhost only; a lost ping is fine.\ncurl -m 1 -s %q >/dev/null 2>&1 &\nexec \"$(dirname \"$0\")/%s-bin\" \"$@\"\n", beaconURL, execName)
+		if err := os.WriteFile(filepath.Join(macos, execName), []byte(shim), 0o755); err != nil {
+			return "", fmt.Errorf("write launcher shim: %w", err)
+		}
+	} else if err := copyFile(executable, filepath.Join(macos, execName), 0o755); err != nil {
 		return "", fmt.Errorf("copy executable: %w", err)
 	}
 
@@ -248,9 +262,12 @@ func sanitizeAppName(name string) string {
 	return out
 }
 
-func bundleSlug(name string) string {
-	return strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+// Slug is the app's stable beacon/bundle identity, derived from its name.
+func Slug(name string) string {
+	return strings.ToLower(strings.ReplaceAll(sanitizeAppName(name), " ", "-"))
 }
+
+func bundleSlug(name string) string { return Slug(name) }
 
 func copyFile(src, dst string, mode os.FileMode) error {
 	in, err := os.Open(src)

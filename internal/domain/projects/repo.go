@@ -302,11 +302,11 @@ func (r *Repo) FinishJob(ctx context.Context, id int64, status, errMsg string, s
 	_, err := r.db.ExecContext(ctx, `UPDATE publishing_jobs SET status=?, error_message=?, store_app_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, status, errMsg, storeAppID, id)
 	return err
 }
-func (r *Repo) UpsertStoreApp(ctx context.Context, projectID int64, d PublishDraft, artifactPath string) (int64, error) {
+func (r *Repo) UpsertStoreApp(ctx context.Context, projectID int64, d PublishDraft, artifactPath, slug string) (int64, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx, `SELECT id FROM store_apps WHERE project_id=?`, projectID).Scan(&id)
 	if err == sql.ErrNoRows {
-		res, err := r.db.ExecContext(ctx, `INSERT INTO store_apps (project_id,organization_id,name,headline,description,visibility,published_version,last_published_at,artifact_path) VALUES (?,1,?,?,?,?,'1.0.0',CURRENT_TIMESTAMP,?)`, projectID, d.AppName, d.Headline, d.Description, d.Visibility, artifactPath)
+		res, err := r.db.ExecContext(ctx, `INSERT INTO store_apps (project_id,organization_id,name,headline,description,visibility,published_version,last_published_at,artifact_path,bundle_slug) VALUES (?,1,?,?,?,?,'1.0.0',CURRENT_TIMESTAMP,?,?)`, projectID, d.AppName, d.Headline, d.Description, d.Visibility, artifactPath, slug)
 		if err != nil {
 			return 0, err
 		}
@@ -315,8 +315,15 @@ func (r *Repo) UpsertStoreApp(ctx context.Context, projectID int64, d PublishDra
 	if err != nil {
 		return 0, err
 	}
-	_, err = r.db.ExecContext(ctx, `UPDATE store_apps SET name=?, headline=?, description=?, visibility=?, last_published_at=CURRENT_TIMESTAMP, artifact_path=? WHERE id=?`, d.AppName, d.Headline, d.Description, d.Visibility, artifactPath, id)
+	_, err = r.db.ExecContext(ctx, `UPDATE store_apps SET name=?, headline=?, description=?, visibility=?, last_published_at=CURRENT_TIMESTAMP, artifact_path=?, bundle_slug=? WHERE id=?`, d.AppName, d.Headline, d.Description, d.Visibility, artifactPath, slug, id)
 	return id, err
+}
+
+// RecordAppEvent stores a beacon event for the app with the given slug.
+// Unknown slugs are a no-op, not an error.
+func (r *Repo) RecordAppEvent(ctx context.Context, slug, kind string) error {
+	_, err := r.db.ExecContext(ctx, `INSERT INTO app_events (store_app_id, kind) SELECT id, ? FROM store_apps WHERE bundle_slug=?`, kind, slug)
+	return err
 }
 func (r *Repo) ListJobs(ctx context.Context, status string) ([]PublishingJob, error) {
 	q := `SELECT j.id,j.project_id,p.name,j.store_app_id,j.status,j.error_message,j.created_at,j.updated_at FROM publishing_jobs j JOIN projects p ON p.id=j.project_id`
@@ -362,7 +369,7 @@ func (r *Repo) ListStoreApps(ctx context.Context, q, filter string) ([]StoreApp,
 	} else if filter == "installed" {
 		where = append(where, "EXISTS(SELECT 1 FROM installed_apps i WHERE i.store_app_id=s.id)")
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT s.id,s.project_id,s.organization_id,s.name,s.headline,s.description,s.visibility,s.published_version,s.last_published_at,s.install_count,s.featured,s.artifact_path, EXISTS(SELECT 1 FROM installed_apps i WHERE i.store_app_id=s.id),s.created_at FROM store_apps s WHERE `+strings.Join(where, " AND ")+` ORDER BY featured DESC, install_count DESC LIMIT 30`, args...)
+	rows, err := r.db.QueryContext(ctx, storeAppSelect+` WHERE `+strings.Join(where, " AND ")+` ORDER BY featured DESC, install_count DESC LIMIT 30`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -377,8 +384,15 @@ func (r *Repo) ListStoreApps(ctx context.Context, q, filter string) ([]StoreApp,
 	}
 	return out, rows.Err()
 }
+const storeAppSelect = `SELECT s.id,s.project_id,s.organization_id,s.name,s.headline,s.description,s.visibility,s.published_version,s.last_published_at,s.install_count,s.featured,s.artifact_path, EXISTS(SELECT 1 FROM installed_apps i WHERE i.store_app_id=s.id),s.created_at,s.bundle_slug,s.expires_at,(SELECT COUNT(*) FROM app_events e WHERE e.store_app_id=s.id AND e.kind='launch'),(SELECT MAX(e.created_at) FROM app_events e WHERE e.store_app_id=s.id AND e.kind='launch') FROM store_apps s`
+
 func (r *Repo) GetStoreApp(ctx context.Context, id int64) (StoreApp, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT s.id,s.project_id,s.organization_id,s.name,s.headline,s.description,s.visibility,s.published_version,s.last_published_at,s.install_count,s.featured,s.artifact_path, EXISTS(SELECT 1 FROM installed_apps i WHERE i.store_app_id=s.id),s.created_at FROM store_apps s WHERE s.id=?`, id)
+	row := r.db.QueryRowContext(ctx, storeAppSelect+` WHERE s.id=?`, id)
+	return scanStoreApp(row)
+}
+
+func (r *Repo) GetStoreAppBySlug(ctx context.Context, slug string) (StoreApp, error) {
+	row := r.db.QueryRowContext(ctx, storeAppSelect+` WHERE s.bundle_slug=?`, slug)
 	return scanStoreApp(row)
 }
 
@@ -387,8 +401,15 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanStoreApp(row rowScanner) (StoreApp, error) {
 	var s StoreApp
 	var pid, oid sql.NullInt64
-	if err := row.Scan(&s.ID, &pid, &oid, &s.Name, &s.Headline, &s.Description, &s.Visibility, &s.PublishedVersion, &s.LastPublishedAt, &s.InstallCount, &s.Featured, &s.ArtifactPath, &s.Installed, &s.CreatedAt); err != nil {
+	var expires, lastLaunch sql.NullTime
+	if err := row.Scan(&s.ID, &pid, &oid, &s.Name, &s.Headline, &s.Description, &s.Visibility, &s.PublishedVersion, &s.LastPublishedAt, &s.InstallCount, &s.Featured, &s.ArtifactPath, &s.Installed, &s.CreatedAt, &s.BundleSlug, &expires, &s.LaunchCount, &lastLaunch); err != nil {
 		return StoreApp{}, err
+	}
+	if expires.Valid {
+		s.ExpiresAt = &expires.Time
+	}
+	if lastLaunch.Valid {
+		s.LastLaunchAt = &lastLaunch.Time
 	}
 	if pid.Valid {
 		s.ProjectID = &pid.Int64

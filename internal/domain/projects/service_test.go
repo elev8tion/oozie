@@ -13,7 +13,7 @@ type fakeBuilder struct {
 	fail bool
 }
 
-func (f fakeBuilder) Build(workdir, appName string) (string, error) {
+func (f fakeBuilder) Build(workdir, appName, beaconURL string) (string, error) {
 	if f.fail {
 		return "", os.ErrNotExist
 	}
@@ -137,7 +137,7 @@ func TestUninstallAndRemoveStoreApp(t *testing.T) {
 	ctx := context.Background()
 	s := newTestService(t)
 	p, _ := s.CreateProject(ctx, "Gone Soon", filepath.Join(t.TempDir(), "g"), true)
-	id, err := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Gone Soon", Headline: "h", Description: "d"}, "")
+	id, err := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Gone Soon", Headline: "h", Description: "d"}, "", "gone-soon")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestInstallRequiresArtifact(t *testing.T) {
 	ctx := context.Background()
 	s := newTestService(t)
 	p, _ := s.CreateProject(ctx, "NoArt", filepath.Join(t.TempDir(), "n"), true)
-	id, err := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "NoArt", Headline: "h", Description: "d"}, "")
+	id, err := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "NoArt", Headline: "h", Description: "d"}, "", "noart")
 	if err != nil {
 		t.Fatal(err)
 	}

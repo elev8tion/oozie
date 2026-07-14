@@ -113,7 +113,28 @@ type StoreApp struct {
 	Featured         bool
 	Installed        bool
 	ArtifactPath     string
+	BundleSlug       string
+	ExpiresAt        *time.Time
+	LaunchCount      int
+	LastLaunchAt     *time.Time
 	CreatedAt        time.Time
+}
+
+// Dormant reports an installed app that hasn't been opened in two weeks
+// (or ever, two weeks after publishing).
+func (s StoreApp) Dormant() bool {
+	if !s.Installed {
+		return false
+	}
+	cutoff := time.Now().Add(-14 * 24 * time.Hour)
+	if s.LastLaunchAt != nil {
+		return s.LastLaunchAt.Before(cutoff)
+	}
+	ref := s.CreatedAt
+	if s.LastPublishedAt != nil {
+		ref = *s.LastPublishedAt
+	}
+	return ref.Before(cutoff)
 }
 
 type PublishingJob struct {

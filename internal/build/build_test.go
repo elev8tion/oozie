@@ -30,7 +30,7 @@ let package = Package(
 	writeFile(t, filepath.Join(dir, "Sources", "HelloOozie", "main.swift"), `print("hello from oozie")`)
 	writeTestPNG(t, filepath.Join(dir, "icon.png"))
 
-	appPath, err := SwiftBuilder{}.Build(dir, "Hello Oozie")
+	appPath, err := SwiftBuilder{}.Build(dir, "Hello Oozie", "http://127.0.0.1:8080/api/beacon/hello-oozie")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -40,6 +40,14 @@ let package = Package(
 	exe := filepath.Join(appPath, "Contents", "MacOS", "HelloOozie")
 	if info, err := os.Stat(exe); err != nil || info.Mode()&0o111 == 0 {
 		t.Fatalf("bundle executable missing or not executable: %v", err)
+	}
+	// The beacon shim wraps the real binary.
+	shim, _ := os.ReadFile(exe)
+	if !strings.Contains(string(shim), "api/beacon/hello-oozie") {
+		t.Error("launcher shim missing beacon URL")
+	}
+	if info, err := os.Stat(exe + "-bin"); err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("real binary missing beside shim: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(appPath, "Contents", "Info.plist")); err != nil {
 		t.Fatalf("Info.plist missing: %v", err)
@@ -85,7 +93,7 @@ func writeTestPNG(t *testing.T, path string) {
 }
 
 func TestBuildFailsWithoutPackage(t *testing.T) {
-	_, err := SwiftBuilder{}.Build(t.TempDir(), "Nope")
+	_, err := SwiftBuilder{}.Build(t.TempDir(), "Nope", "")
 	if err == nil {
 		t.Fatal("expected error for empty project")
 	}

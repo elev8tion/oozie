@@ -33,10 +33,19 @@ type Service struct {
 	catalog pi.Catalog
 	builder build.AppBuilder
 	jobs    sync.WaitGroup
+	baseURL string // oozie's own address, baked into beacon shims and improve links
 }
 
 func NewService(repo *Repo) *Service {
-	return &Service{repo: repo, builder: build.SwiftBuilder{}}
+	return &Service{repo: repo, builder: build.SwiftBuilder{}, baseURL: "http://127.0.0.1:8080"}
+}
+
+// SetBaseURL records the address published apps use to reach oozie
+// (beacon pings, improve links).
+func (s *Service) SetBaseURL(u string) {
+	if u != "" {
+		s.baseURL = strings.TrimSuffix(u, "/")
+	}
 }
 
 // SetBuilder swaps the app builder (tests use a fake).
@@ -437,12 +446,13 @@ func (s *Service) runPublishJob(jobID, projectID int64, draft PublishDraft, work
 	if err := s.repo.SetJobRunning(ctx, jobID); err != nil {
 		log.Printf("publish job %d: %v", jobID, err)
 	}
-	appPath, err := s.builder.Build(workdir, draft.AppName)
+	slug := build.Slug(draft.AppName)
+	appPath, err := s.builder.Build(workdir, draft.AppName, s.baseURL+"/api/beacon/"+slug)
 	if err != nil {
 		_ = s.repo.FinishJob(ctx, jobID, "failed", err.Error(), nil)
 		return
 	}
-	appID, err := s.repo.UpsertStoreApp(ctx, projectID, draft, appPath)
+	appID, err := s.repo.UpsertStoreApp(ctx, projectID, draft, appPath, slug)
 	if err != nil {
 		_ = s.repo.FinishJob(ctx, jobID, "failed", "app built but store update failed: "+err.Error(), nil)
 		return
@@ -549,6 +559,17 @@ func installedAppPath(app StoreApp) (string, error) {
 
 func (s *Service) InstalledApps(ctx context.Context) ([]StoreApp, error) {
 	return s.repo.InstalledApps(ctx)
+}
+
+// RecordLaunch handles a beacon ping from an installed app's launcher
+// shim. Unknown slugs are ignored (the app may have been removed).
+func (s *Service) RecordLaunch(ctx context.Context, slug string) {
+	if strings.TrimSpace(slug) == "" {
+		return
+	}
+	if err := s.repo.RecordAppEvent(ctx, slug, "launch"); err != nil {
+		log.Printf("record launch for %q: %v", slug, err)
+	}
 }
 func (s *Service) GetSettings(ctx context.Context) (Settings, error) { return s.repo.GetSettings(ctx) }
 func (s *Service) SaveSettings(ctx context.Context, settings Settings) error {

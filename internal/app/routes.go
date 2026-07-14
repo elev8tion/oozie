@@ -44,6 +44,10 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /api/beacon/{slug}", h.Beacon)
 	mux.HandleFunc("POST /api/beacon/{slug}", h.Beacon)
 
+	// The fix-me wormhole: published apps link here from their Help menu.
+	mux.HandleFunc("GET /improve/{slug}", h.ImprovePage)
+	mux.HandleFunc("POST /improve/{slug}", h.ImproveSubmit)
+
 	mux.HandleFunc("GET /store", h.Store)
 	mux.HandleFunc("GET /store/apps/{id}", h.StoreApp)
 	mux.HandleFunc("POST /store/apps/{id}/install", h.InstallApp)

@@ -224,6 +224,32 @@ func (h *Handlers) Feedback(w http.ResponseWriter, r *http.Request) {
 	h.renderer.HTML(w, 200, "partials/projects/flash", render.ViewData{Flash: "Feedback sent."})
 }
 
+// ImprovePage is the fix-me wormhole: a tiny focused page every published
+// app links to from its Help menu.
+func (h *Handlers) ImprovePage(w http.ResponseWriter, r *http.Request) {
+	app, err := h.service.AppBySlug(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		h.errorPage(w, r, 404, "No published app matches this link. Publish the project first.")
+		return
+	}
+	h.page(w, r, "Improve "+app.Name, "pages/improve/show-content", map[string]any{"App": app})
+}
+
+func (h *Handlers) ImproveSubmit(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	app, err := h.service.AppBySlug(r.Context(), slug)
+	if err != nil {
+		h.errorPage(w, r, 404, "No published app matches this link.")
+		return
+	}
+	_ = r.ParseForm()
+	if err := h.service.FileImprovement(r.Context(), slug, r.FormValue("text")); err != nil {
+		h.page(w, r, "Improve "+app.Name, "pages/improve/show-content", map[string]any{"App": app, "Error": err.Error(), "Text": r.FormValue("text")})
+		return
+	}
+	h.page(w, r, "Improve "+app.Name, "pages/improve/show-content", map[string]any{"App": app, "Sent": true})
+}
+
 // Beacon records a launch ping from an installed app's shim. Always 204:
 // the shim never retries and must never block an app launch.
 func (h *Handlers) Beacon(w http.ResponseWriter, r *http.Request) {

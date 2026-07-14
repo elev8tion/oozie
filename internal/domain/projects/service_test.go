@@ -173,3 +173,70 @@ func TestInstallRequiresArtifact(t *testing.T) {
 		t.Fatal("expected validation error installing an app with no artifact")
 	}
 }
+
+// TestImproveLoopRepublishes proves the fix-me wormhole closes itself: an
+// improve-linked agent request that settles 'completed' republishes the
+// project and marks the improvement done.
+func TestImproveLoopRepublishes(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	s.SetBuilder(fakeBuilder{})
+	p, _ := s.CreateProject(ctx, "Fixable", filepath.Join(t.TempDir(), "f"), true)
+	_ = s.SaveDraft(ctx, PublishDraft{ProjectID: p.ID, AppName: "Fixable", Headline: "h", Description: "d"})
+	if err := s.Publish(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.WaitForJobs()
+	app, err := s.AppBySlug(ctx, "fixable")
+	if err != nil {
+		t.Fatalf("published app not found by slug: %v", err)
+	}
+
+	session, _ := s.repo.GetSession(ctx, p.ID)
+	reqID, err := s.repo.CreateAgentRequest(ctx, session.ID, "build", "make it better")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.repo.InsertImproveRequest(ctx, reqID, app.ID, "make it better"); err != nil {
+		t.Fatal(err)
+	}
+
+	s.RequestSettled(p.ID, reqID, "completed")
+	s.WaitForJobs()
+
+	imp, err := s.repo.ImproveByRequest(ctx, reqID)
+	if err != nil || imp == nil {
+		t.Fatalf("improve request lookup: %v", err)
+	}
+	if imp.Status != "done" {
+		t.Fatalf("improve status = %q, want done", imp.Status)
+	}
+	jobs, _ := s.ListJobs(ctx, "succeeded")
+	if len(jobs) != 2 {
+		t.Fatalf("expected the improvement to trigger a second publish job, got %d succeeded", len(jobs))
+	}
+}
+
+// TestImproveLoopFailedAgent marks the improvement failed when the agent
+// request settles unsuccessfully, without republishing.
+func TestImproveLoopFailedAgent(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	s.SetBuilder(fakeBuilder{})
+	p, _ := s.CreateProject(ctx, "Unfixable", filepath.Join(t.TempDir(), "u"), true)
+	id, _ := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Unfixable", Headline: "h", Description: "d"}, "", "unfixable")
+	session, _ := s.repo.GetSession(ctx, p.ID)
+	reqID, _ := s.repo.CreateAgentRequest(ctx, session.ID, "build", "impossible")
+	_ = s.repo.InsertImproveRequest(ctx, reqID, id, "impossible")
+
+	s.RequestSettled(p.ID, reqID, "failed")
+	s.WaitForJobs()
+
+	imp, _ := s.repo.ImproveByRequest(ctx, reqID)
+	if imp == nil || imp.Status != "failed" {
+		t.Fatalf("improve status = %v, want failed", imp)
+	}
+	if jobs, _ := s.ListJobs(ctx, ""); len(jobs) != 0 {
+		t.Fatalf("failed agent run must not publish, got %d jobs", len(jobs))
+	}
+}

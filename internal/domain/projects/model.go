@@ -137,6 +137,17 @@ func (s StoreApp) Dormant() bool {
 	return ref.Before(cutoff)
 }
 
+// ImproveRequest links an agent request filed from inside a published app
+// to the store app that should auto-republish when it completes.
+type ImproveRequest struct {
+	ID         int64
+	RequestID  int64
+	StoreAppID int64
+	Status     string // building|publishing|done|failed
+	Note       string
+	CreatedAt  time.Time
+}
+
 type PublishingJob struct {
 	ID           int64
 	ProjectID    int64

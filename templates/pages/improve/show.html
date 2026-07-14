@@ -1,0 +1,21 @@
+{{define "pages/improve/show-content"}}
+{{$app := index .Data "App"}}
+<section class="hero panel" style="padding:22px">
+  <p class="eyebrow">Improve</p>
+  <h1>{{$app.Name}}</h1>
+  {{if index .Data "Sent"}}
+  <p class="lead">On it. The agent is working on your request now.</p>
+  <p class="muted">When it finishes, oozie rebuilds {{$app.Name}} and{{if $app.Installed}} refreshes the copy in ~/Applications{{else}} updates the store listing{{end}} automatically — nothing else to do. You can watch the work live on the project's agent page.</p>
+  <div class="actions">{{if $app.ProjectID}}<a class="button primary" href="/projects/{{$app.ProjectID}}/agent">Watch the agent</a>{{end}}<a class="button" href="/store/apps/{{$app.ID}}">Back to the store</a></div>
+  {{else}}
+  <p class="muted">Tell the agent what should be better. It patches the app, and oozie republishes{{if $app.Installed}} and reinstalls{{end}} it automatically.</p>
+  {{if index .Data "Error"}}<div class="notice error">{{index .Data "Error"}}</div>{{end}}
+  <form method="post" action="/improve/{{$app.BundleSlug}}" class="form-stack">
+    <label>What should be better?<textarea name="text" placeholder="The timer should flash red when it hits zero…" autofocus>{{index .Data "Text"}}</textarea></label>
+    <div class="actions"><button class="button primary">Send to the agent</button></div>
+  </form>
+  {{end}}
+</section>
+{{end}}
+
+{{define "pages/improve/show-placeholder"}}<div></div>{{end}}

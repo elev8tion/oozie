@@ -319,6 +319,39 @@ func (r *Repo) UpsertStoreApp(ctx context.Context, projectID int64, d PublishDra
 	return id, err
 }
 
+// StoreAppSlugForProject returns the published slug for a project, or ""
+// when the project has never been published.
+func (r *Repo) StoreAppSlugForProject(ctx context.Context, projectID int64) (string, error) {
+	var slug string
+	err := r.db.QueryRowContext(ctx, `SELECT bundle_slug FROM store_apps WHERE project_id=?`, projectID).Scan(&slug)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return slug, err
+}
+
+func (r *Repo) InsertImproveRequest(ctx context.Context, requestID, storeAppID int64, note string) error {
+	_, err := r.db.ExecContext(ctx, `INSERT INTO improve_requests (request_id,store_app_id,status,note) VALUES (?,?,'building',?)`, requestID, storeAppID, note)
+	return err
+}
+
+func (r *Repo) ImproveByRequest(ctx context.Context, requestID int64) (*ImproveRequest, error) {
+	var imp ImproveRequest
+	err := r.db.QueryRowContext(ctx, `SELECT id,request_id,store_app_id,status,note,created_at FROM improve_requests WHERE request_id=?`, requestID).Scan(&imp.ID, &imp.RequestID, &imp.StoreAppID, &imp.Status, &imp.Note, &imp.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &imp, nil
+}
+
+func (r *Repo) SetImproveStatus(ctx context.Context, id int64, status string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE improve_requests SET status=? WHERE id=?`, status, id)
+	return err
+}
+
 // RecordAppEvent stores a beacon event for the app with the given slug.
 // Unknown slugs are a no-op, not an error.
 func (r *Repo) RecordAppEvent(ctx context.Context, slug, kind string) error {

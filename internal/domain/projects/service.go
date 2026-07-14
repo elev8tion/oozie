@@ -133,20 +133,27 @@ func (s *Service) models() []ModelOption {
 }
 
 func (s *Service) SendAgentMessage(ctx context.Context, projectID int64, mode, message string) error {
+	_, err := s.sendAgentMessage(ctx, projectID, mode, message)
+	return err
+}
+
+// sendAgentMessage files an agent request and returns its ID so callers
+// (the improve loop, the fairy) can watch for it to settle.
+func (s *Service) sendAgentMessage(ctx context.Context, projectID int64, mode, message string) (int64, error) {
 	message = strings.TrimSpace(message)
 	if message == "" {
-		return ErrValidation{"Message is required."}
+		return 0, ErrValidation{"Message is required."}
 	}
 	if s.agent == nil {
-		return ErrValidation{"The pi agent is not configured."}
+		return 0, ErrValidation{"The pi agent is not configured."}
 	}
 	project, err := s.repo.GetProject(ctx, projectID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	session, err := s.repo.GetSession(ctx, projectID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if mode != "plan" {
 		mode = "build"
@@ -158,31 +165,42 @@ func (s *Service) SendAgentMessage(ctx context.Context, projectID int64, mode, m
 	if session.PiSessionID == "" {
 		session.PiSessionID = newPiSessionID(projectID)
 		if err := s.repo.SetPiSessionID(ctx, session.ID, session.PiSessionID); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	workdir, err := projectWorkdir(project)
 	if err != nil {
-		return ErrValidation{"Project directory unavailable: " + err.Error()}
+		return 0, ErrValidation{"Project directory unavailable: " + err.Error()}
 	}
 	requestID, err := s.repo.CreateAgentRequest(ctx, session.ID, mode, message)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	opts := pi.StartOptions{
 		ProjectID:    projectID,
 		Workdir:      workdir,
 		Model:        model,
 		PiSessionID:  session.PiSessionID,
-		SystemPrompt: oozieSystemPrompt(project, workdir),
+		SystemPrompt: oozieSystemPrompt(project, workdir, s.improveURL(ctx, project)),
 		Trusted:      project.Trusted,
 	}
 	if err := s.agent.Prompt(opts, requestID, wrapModeMessage(mode, message)); err != nil {
 		_ = s.repo.InsertMessage(ctx, requestID, "system", "error", "Failed to start pi: "+err.Error())
 		_ = s.repo.CompleteRequest(ctx, requestID, "failed")
-		return ErrValidation{"Could not reach the pi agent: " + err.Error()}
+		return 0, ErrValidation{"Could not reach the pi agent: " + err.Error()}
 	}
-	return nil
+	return requestID, nil
+}
+
+// improveURL is the wormhole every published app links back to. Published
+// apps use their real slug; unpublished ones get the predicted slug from
+// the project name (the improve endpoint is slug-addressed either way).
+func (s *Service) improveURL(ctx context.Context, p Project) string {
+	slug, err := s.repo.StoreAppSlugForProject(ctx, p.ID)
+	if err != nil || slug == "" {
+		slug = build.Slug(p.Name)
+	}
+	return s.baseURL + "/improve/" + slug
 }
 
 func (s *Service) SelectModel(ctx context.Context, projectID int64, model string) error {
@@ -281,6 +299,73 @@ func (s *Service) RequestSettled(projectID, requestID int64, status string) {
 	if err := s.repo.CompleteRequest(context.Background(), requestID, status); err != nil {
 		log.Printf("settle request %d (project %d): %v", requestID, projectID, err)
 	}
+	s.settleImprovement(projectID, requestID, status)
+}
+
+// settleImprovement closes the fix-me loop: when an agent request that
+// came from inside a published app finishes, republish the project and,
+// if the app is installed, refresh the installed copy — no human touches
+// the factory.
+func (s *Service) settleImprovement(projectID, requestID int64, status string) {
+	ctx := context.Background()
+	imp, err := s.repo.ImproveByRequest(ctx, requestID)
+	if err != nil || imp == nil {
+		return
+	}
+	if status != "completed" {
+		_ = s.repo.SetImproveStatus(ctx, imp.ID, "failed")
+		return
+	}
+	_ = s.repo.SetImproveStatus(ctx, imp.ID, "publishing")
+	appID := imp.StoreAppID
+	err = s.publish(ctx, projectID, func(_ int64, buildErr error) {
+		if buildErr != nil {
+			log.Printf("improve %d: republish failed: %v", imp.ID, buildErr)
+			_ = s.repo.SetImproveStatus(ctx, imp.ID, "failed")
+			return
+		}
+		app, err := s.repo.GetStoreApp(ctx, appID)
+		if err == nil && app.Installed {
+			if err := s.InstallApp(ctx, appID); err != nil {
+				log.Printf("improve %d: reinstall failed: %v", imp.ID, err)
+				_ = s.repo.SetImproveStatus(ctx, imp.ID, "failed")
+				return
+			}
+		}
+		_ = s.repo.SetImproveStatus(ctx, imp.ID, "done")
+	})
+	if err != nil {
+		log.Printf("improve %d: publish: %v", imp.ID, err)
+		_ = s.repo.SetImproveStatus(ctx, imp.ID, "failed")
+	}
+}
+
+// AppBySlug resolves a published app from its improve/beacon slug.
+func (s *Service) AppBySlug(ctx context.Context, slug string) (StoreApp, error) {
+	return s.repo.GetStoreAppBySlug(ctx, strings.TrimSpace(slug))
+}
+
+// FileImprovement is the fix-me wormhole: text typed inside a published
+// app (or on its store page) becomes a BUILD request on the app's project,
+// and the loop auto-republishes + reinstalls when the agent finishes.
+func (s *Service) FileImprovement(ctx context.Context, slug, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ErrValidation{"Describe what should be better."}
+	}
+	app, err := s.repo.GetStoreAppBySlug(ctx, slug)
+	if err != nil {
+		return ErrValidation{"No published app matches this link."}
+	}
+	if app.ProjectID == nil {
+		return ErrValidation{"This app has no linked project, so the agent can't work on it."}
+	}
+	msg := fmt.Sprintf("[improvement request filed from the installed app %q]\n\nThe user asked for this improvement:\n\n%s\n\nImplement it in this project, keep everything else working, and verify with a build (and visual review for UI changes). oozie republishes and reinstalls the app automatically when you finish.", app.Name, text)
+	requestID, err := s.sendAgentMessage(ctx, *app.ProjectID, "build", msg)
+	if err != nil {
+		return err
+	}
+	return s.repo.InsertImproveRequest(ctx, requestID, app.ID, text)
 }
 func (s *Service) Question(projectID, requestID int64, rpcID, prompt, optionsJSON string) {
 	if err := s.repo.InsertQuestion(context.Background(), projectID, requestID, rpcID, prompt, optionsJSON); err != nil {
@@ -351,7 +436,7 @@ func newPiSessionID(projectID int64) string {
 	return fmt.Sprintf("oozie-p%d-%s", projectID, hex.EncodeToString(buf))
 }
 
-func oozieSystemPrompt(p Project, workdir string) string {
+func oozieSystemPrompt(p Project, workdir, improveURL string) string {
 	return fmt.Sprintf(`You are running inside oozie, a local macOS workspace whose purpose is building small personal Mac apps, as the agent for the project %q (working directory: %s).
 
 How to behave in oozie:
@@ -365,6 +450,7 @@ Producing Mac apps (oozie's publish pipeline):
 - When the user asks for an app, scaffold a Swift package at the project root: a Package.swift with a single executable target, macOS platform .macOS(.v13) or later, sources under Sources/.
 - For GUI apps, use SwiftUI with an explicit AppDelegate-free entry (@main struct conforming to App) and call NSApplication.shared.setActivationPolicy(.regular) plus NSApp.activate(ignoringOtherApps: true) at launch so the window appears when run from a bundle.
 - Verify with 'swift build' before declaring the work done.
+- Every GUI app gets a Help-menu item "Improve this app…" (CommandGroup replacing .help, or an added menu item) that opens %q with NSWorkspace.shared.open — it lets the user file improvement requests that flow straight back to you. Do not build any other feedback UI.
 - Every app gets an icon before it's done. Generate one on-device with Apple Intelligence: sh Tools/generate-icon.sh "flat minimal app icon of <subject> on a rounded square <color> background, no text" icon.png — then read icon.png to confirm it fits the app. If generation is unavailable (Apple Intelligence disabled), draw a simple icon.png with AppKit instead (rounded rect, gradient, bold SF-Symbol-like glyph). oozie converts icon.png at the project root into the .app icon when publishing.
 
 Design quality (non-negotiable):
@@ -376,7 +462,7 @@ Visual review (run after any build that changes UI):
 2. Read review.png with your read tool and critique the actual pixels against DESIGN.md: spacing, alignment, hierarchy, empty states, anything default-looking.
 3. Fix what fails, rebuild, and re-run the review. Ship only when the screenshot would pass DESIGN.md.
 If the screenshot comes back black/empty, the user needs to grant Screen Recording permission (System Settings → Privacy & Security) — tell them, and continue without the review rather than looping.
-- oozie's Publish action runs 'swift build -c release' and wraps the executable in a .app bundle, so the package MUST build cleanly from the project root with no extra steps. If you instead produce an .xcodeproj, place the final built .app in the project root or dist/.`, p.Name, workdir)
+- oozie's Publish action runs 'swift build -c release' and wraps the executable in a .app bundle, so the package MUST build cleanly from the project root with no extra steps. If you instead produce an .xcodeproj, place the final built .app in the project root or dist/.`, p.Name, workdir, improveURL)
 }
 
 func wrapModeMessage(mode, message string) string {
@@ -416,6 +502,12 @@ func (s *Service) SaveDraft(ctx context.Context, d PublishDraft) error {
 // queued immediately, a background worker runs the build, and on success
 // the app appears in (or updates) the store with its artifact path.
 func (s *Service) Publish(ctx context.Context, projectID int64) error {
+	return s.publish(ctx, projectID, nil)
+}
+
+// publish queues a build job; after (optional) runs when the job settles,
+// with the store app ID on success or the build error on failure.
+func (s *Service) publish(ctx context.Context, projectID int64, after func(storeAppID int64, buildErr error)) error {
 	draft, err := s.repo.GetDraft(ctx, projectID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrValidation{"Save a publish draft (name, headline, description) before publishing."}
@@ -436,11 +528,11 @@ func (s *Service) Publish(ctx context.Context, projectID int64) error {
 		return err
 	}
 	s.jobs.Add(1)
-	go s.runPublishJob(jobID, projectID, draft, workdir)
+	go s.runPublishJob(jobID, projectID, draft, workdir, after)
 	return nil
 }
 
-func (s *Service) runPublishJob(jobID, projectID int64, draft PublishDraft, workdir string) {
+func (s *Service) runPublishJob(jobID, projectID int64, draft PublishDraft, workdir string, after func(int64, error)) {
 	defer s.jobs.Done()
 	ctx := context.Background()
 	if err := s.repo.SetJobRunning(ctx, jobID); err != nil {
@@ -450,14 +542,23 @@ func (s *Service) runPublishJob(jobID, projectID int64, draft PublishDraft, work
 	appPath, err := s.builder.Build(workdir, draft.AppName, s.baseURL+"/api/beacon/"+slug)
 	if err != nil {
 		_ = s.repo.FinishJob(ctx, jobID, "failed", err.Error(), nil)
+		if after != nil {
+			after(0, err)
+		}
 		return
 	}
 	appID, err := s.repo.UpsertStoreApp(ctx, projectID, draft, appPath, slug)
 	if err != nil {
 		_ = s.repo.FinishJob(ctx, jobID, "failed", "app built but store update failed: "+err.Error(), nil)
+		if after != nil {
+			after(0, err)
+		}
 		return
 	}
 	_ = s.repo.FinishJob(ctx, jobID, "succeeded", "", &appID)
+	if after != nil {
+		after(appID, nil)
+	}
 }
 
 func (s *Service) ListJobs(ctx context.Context, status string) ([]PublishingJob, error) {

@@ -44,7 +44,7 @@ func (h *Handlers) Projects(w http.ResponseWriter, r *http.Request) {
 		h.errorPage(w, r, 500, "Couldn't load projects.")
 		return
 	}
-	h.page(w, r, "Projects · oozie", "pages/projects/index-content", map[string]any{"Projects": ps, "Q": r.URL.Query().Get("q"), "Filter": r.URL.Query().Get("filter")})
+	h.page(w, r, "Projects · oozie", "pages/projects/index-content", map[string]any{"Projects": ps, "Q": r.URL.Query().Get("q"), "Filter": r.URL.Query().Get("filter"), "Insights": h.service.Insights(r.Context())})
 }
 func (h *Handlers) ProjectsList(w http.ResponseWriter, r *http.Request) {
 	ps, err := h.service.ListProjects(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("filter"))

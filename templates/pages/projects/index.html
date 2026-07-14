@@ -3,6 +3,13 @@
   <div><p class="eyebrow">Workspace</p><h1>My Projects</h1><p class="muted">Create, open, archive, and launch project-bound agent sessions.</p></div>
   <a class="button primary" href="/projects/new">Create Project</a>
 </section>
+{{$insights := index .Data "Insights"}}
+{{if $insights}}
+<section class="panel" style="margin-bottom:14px">
+  <p class="eyebrow">oozie noticed</p>
+  {{range $i := $insights}}<div class="mini-row"><span>{{$i.Text}}</span><a class="button small" href="{{$i.ActionURL}}">{{$i.ActionTxt}}</a></div>{{end}}
+</section>
+{{end}}
 <form class="filterbar" hx-get="/fragments/projects/list" hx-target="#project-list" hx-trigger="input changed delay:250ms, change">
   <label>Search <input name="q" value="{{index .Data "Q"}}" placeholder="Project name"></label>
   <label>State <select name="filter"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label>

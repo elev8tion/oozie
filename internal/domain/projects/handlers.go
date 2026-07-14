@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -475,6 +476,66 @@ func draftFromForm(projectID int64, r *http.Request) PublishDraft {
 func (h *Handlers) renderJobs(w http.ResponseWriter, r *http.Request, flash, errMsg string) {
 	jobs, _ := h.service.ListJobs(r.Context(), "")
 	h.renderer.HTML(w, 200, "partials/publishing/list", render.ViewData{Flash: flash, Err: errMsg, Data: map[string]any{"Jobs": jobs, "Active": jobsActive(jobs)}})
+}
+
+// Surgery: point at a pixel of the running app, describe the change.
+func (h *Handlers) SurgeryPage(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	app, shot := h.service.ScreenshotPath(r.Context(), id)
+	if app.ID == 0 {
+		h.errorPage(w, r, 404, "App not found in the store.")
+		return
+	}
+	h.page(w, r, "Surgery · "+app.Name, "pages/surgery/show-content", map[string]any{"App": app, "HasShot": shot != "", "Flash": r.URL.Query().Get("flash"), "Error": r.URL.Query().Get("err")})
+}
+
+func (h *Handlers) SurgeryScreenshot(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	_, shot := h.service.ScreenshotPath(r.Context(), id)
+	if shot == "" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeFile(w, r, shot)
+}
+
+func (h *Handlers) SurgeryCapture(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	q := "flash=" + url.QueryEscape("Fresh screenshot captured.")
+	if err := h.service.CaptureScreenshot(r.Context(), id); err != nil {
+		q = "err=" + url.QueryEscape(err.Error())
+	}
+	http.Redirect(w, r, "/store/apps/"+strconv.FormatInt(id, 10)+"/surgery?"+q, http.StatusSeeOther)
+}
+
+func (h *Handlers) SurgerySubmit(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	_ = r.ParseForm()
+	x, _ := strconv.ParseFloat(r.FormValue("x_pct"), 64)
+	y, _ := strconv.ParseFloat(r.FormValue("y_pct"), 64)
+	if err := h.service.FileSurgery(r.Context(), id, x, y, r.FormValue("note")); err != nil {
+		http.Redirect(w, r, "/store/apps/"+strconv.FormatInt(id, 10)+"/surgery?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	app, _ := h.service.GetStoreApp(r.Context(), id)
+	if app.ProjectID != nil {
+		http.Redirect(w, r, "/projects/"+strconv.FormatInt(*app.ProjectID, 10)+"/agent", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/store/apps/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
 func (h *Handlers) Wishes(w http.ResponseWriter, r *http.Request) {

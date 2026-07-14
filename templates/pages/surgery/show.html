@@ -1,0 +1,40 @@
+{{define "pages/surgery/show-content"}}
+{{$app := index .Data "App"}}
+<section class="toolbar"><div><p class="eyebrow">Surgery</p><h1>{{$app.Name}}</h1><p class="muted">Click the thing on the screenshot, say what should change, and the agent operates on it — like pointing at a wall and telling the contractor.</p></div>
+<form method="post" action="/store/apps/{{$app.ID}}/surgery/capture"><button class="button">{{if index .Data "HasShot"}}Retake screenshot{{else}}Take screenshot{{end}}</button></form></section>
+{{if index .Data "Flash"}}<div class="notice good">{{index .Data "Flash"}}</div>{{end}}
+{{if index .Data "Error"}}<div class="notice error">{{index .Data "Error"}}</div>{{end}}
+{{if index .Data "HasShot"}}
+<form method="post" action="/store/apps/{{$app.ID}}/surgery" class="form-stack">
+  <div class="panel" style="position:relative;padding:8px">
+    <img id="surgery-shot" src="/store/apps/{{$app.ID}}/surgery/screenshot" alt="Screenshot of {{$app.Name}}" style="max-width:100%;display:block;cursor:crosshair;border-radius:8px">
+    <div id="surgery-marker" style="display:none;position:absolute;width:18px;height:18px;border:3px solid var(--accent);border-radius:50%;pointer-events:none;transform:translate(-50%,-50%);box-shadow:0 0 0 3px rgba(255,255,255,.6)"></div>
+  </div>
+  <input type="hidden" name="x_pct" id="surgery-x" value="-1">
+  <input type="hidden" name="y_pct" id="surgery-y" value="-1">
+  <label>What should change at that spot?<textarea name="note" placeholder="This button — make it bigger and blue" required></textarea></label>
+  <div class="actions"><button class="button primary">Operate</button><span class="muted" id="surgery-hint">Click a point on the screenshot first.</span></div>
+</form>
+<script>
+(function () {
+  var img = document.getElementById('surgery-shot');
+  var marker = document.getElementById('surgery-marker');
+  img.addEventListener('click', function (e) {
+    var r = img.getBoundingClientRect();
+    var x = ((e.clientX - r.left) / r.width) * 100;
+    var y = ((e.clientY - r.top) / r.height) * 100;
+    document.getElementById('surgery-x').value = x.toFixed(1);
+    document.getElementById('surgery-y').value = y.toFixed(1);
+    marker.style.display = 'block';
+    marker.style.left = (e.clientX - r.left + img.offsetLeft) + 'px';
+    marker.style.top = (e.clientY - r.top + img.offsetTop) + 'px';
+    document.getElementById('surgery-hint').textContent = 'Target locked: ' + x.toFixed(0) + '%, ' + y.toFixed(0) + '%';
+  });
+})();
+</script>
+{{else}}
+<div class="empty panel">No screenshot yet. Take one — oozie builds the app, launches it, captures the window, and quits it. (Needs Screen Recording permission the first time.)</div>
+{{end}}
+{{end}}
+
+{{define "pages/surgery/show-placeholder"}}<div></div>{{end}}

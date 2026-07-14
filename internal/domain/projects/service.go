@@ -615,20 +615,42 @@ func (s *Service) SaveFeedback(ctx context.Context, projectID int64, typ, reason
 func (s *Service) GetDraft(ctx context.Context, projectID int64) (PublishDraft, error) {
 	d, err := s.repo.GetDraft(ctx, projectID)
 	if err != nil {
-		p, _ := s.repo.GetProject(ctx, projectID)
-		return PublishDraft{ProjectID: projectID, AppName: p.Name, Headline: "A focused project workspace", PublishTarget: "public", Visibility: "unlisted", ScreenshotManifest: "[]"}, nil
+		return s.draftWithDefaults(ctx, PublishDraft{ProjectID: projectID}), nil
 	}
 	return d, err
 }
-func (s *Service) SaveDraft(ctx context.Context, d PublishDraft) error {
-	if strings.TrimSpace(d.AppName) == "" || strings.TrimSpace(d.Headline) == "" || strings.TrimSpace(d.Description) == "" {
-		return ErrValidation{"App name, headline, and description are required."}
+
+// draftWithDefaults fills any blank draft fields so publishing never
+// dead-ends on an incomplete form: app name falls back to the project
+// name, headline to a stock line, description to the headline. The user
+// can polish the listing afterwards.
+func (s *Service) draftWithDefaults(ctx context.Context, d PublishDraft) PublishDraft {
+	if strings.TrimSpace(d.AppName) == "" {
+		p, _ := s.repo.GetProject(ctx, d.ProjectID)
+		d.AppName = p.Name
+	}
+	if strings.TrimSpace(d.Headline) == "" {
+		d.Headline = "A focused project workspace"
+	}
+	if strings.TrimSpace(d.Description) == "" {
+		d.Description = d.Headline
 	}
 	if d.PublishTarget == "" {
 		d.PublishTarget = "public"
 	}
 	if d.Visibility == "" {
 		d.Visibility = "unlisted"
+	}
+	if d.ScreenshotManifest == "" {
+		d.ScreenshotManifest = "[]"
+	}
+	return d
+}
+
+func (s *Service) SaveDraft(ctx context.Context, d PublishDraft) error {
+	d = s.draftWithDefaults(ctx, d)
+	if strings.TrimSpace(d.AppName) == "" {
+		return ErrValidation{"App name is required."}
 	}
 	return s.repo.SaveDraft(ctx, d)
 }
@@ -645,9 +667,13 @@ func (s *Service) Publish(ctx context.Context, projectID int64) error {
 func (s *Service) publish(ctx context.Context, projectID int64, after func(storeAppID int64, buildErr error)) error {
 	draft, err := s.repo.GetDraft(ctx, projectID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrValidation{"Save a publish draft (name, headline, description) before publishing."}
-	}
-	if err != nil {
+		// No draft yet — publish anyway with sensible defaults so one
+		// click always works; the listing can be polished afterwards.
+		draft = s.draftWithDefaults(ctx, PublishDraft{ProjectID: projectID})
+		if err := s.SaveDraft(ctx, draft); err != nil {
+			return err
+		}
+	} else if err != nil {
 		return err
 	}
 	project, err := s.repo.GetProject(ctx, projectID)

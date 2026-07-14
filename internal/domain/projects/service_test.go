@@ -55,12 +55,38 @@ func TestCreateProjectValidation(t *testing.T) {
 	}
 }
 
-func TestPublishRequiresDraft(t *testing.T) {
+func TestPublishWithoutDraftUsesDefaults(t *testing.T) {
+	ctx := context.Background()
 	s := newTestService(t)
-	p, _ := s.CreateProject(context.Background(), "NoDraft", filepath.Join(t.TempDir(), "p"), true)
-	err := s.Publish(context.Background(), p.ID)
-	if _, ok := err.(ErrValidation); !ok {
-		t.Fatalf("expected validation error without a draft, got %v", err)
+	s.SetBuilder(fakeBuilder{})
+	p, _ := s.CreateProject(ctx, "NoDraft", filepath.Join(t.TempDir(), "p"), true)
+	if err := s.Publish(ctx, p.ID); err != nil {
+		t.Fatalf("publish without a draft should fall back to defaults, got %v", err)
+	}
+	s.WaitForJobs()
+	d, err := s.GetDraft(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.AppName != "NoDraft" || d.Headline == "" || d.Description == "" {
+		t.Errorf("auto-created draft missing defaults: %+v", d)
+	}
+	jobs, _ := s.ListJobs(ctx, "")
+	if len(jobs) != 1 || jobs[0].Status != "succeeded" {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+}
+
+func TestSaveDraftFillsDefaults(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	p, _ := s.CreateProject(ctx, "Sparse", filepath.Join(t.TempDir(), "p"), true)
+	if err := s.SaveDraft(ctx, PublishDraft{ProjectID: p.ID, AppName: "Sparse"}); err != nil {
+		t.Fatalf("sparse draft should be accepted with defaults, got %v", err)
+	}
+	d, _ := s.GetDraft(ctx, p.ID)
+	if d.Headline == "" || d.Description == "" {
+		t.Errorf("defaults not filled: %+v", d)
 	}
 }
 

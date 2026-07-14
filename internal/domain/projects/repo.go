@@ -4,10 +4,23 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"time"
 )
 
 type Repo struct{ db *sql.DB }
+
+// parseSQLiteTime handles the formats SQLite emits for datetime values
+// that reach us as text (expression results have no declared type).
+func parseSQLiteTime(s string) (time.Time, error) {
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, "2006-01-02 15:04:05.999999999-07:00"} {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognized time %q", s)
+}
 
 func NewRepo(db *sql.DB) *Repo { return &Repo{db: db} }
 
@@ -490,7 +503,10 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanStoreApp(row rowScanner) (StoreApp, error) {
 	var s StoreApp
 	var pid, oid sql.NullInt64
-	var expires, lastLaunch sql.NullTime
+	var expires sql.NullTime
+	// MAX(created_at) is an expression, so the driver returns it as a raw
+	// string (no column type to map) — scan text and parse.
+	var lastLaunch sql.NullString
 	if err := row.Scan(&s.ID, &pid, &oid, &s.Name, &s.Headline, &s.Description, &s.Visibility, &s.PublishedVersion, &s.LastPublishedAt, &s.InstallCount, &s.Featured, &s.ArtifactPath, &s.Installed, &s.CreatedAt, &s.BundleSlug, &expires, &s.LaunchCount, &lastLaunch); err != nil {
 		return StoreApp{}, err
 	}
@@ -498,7 +514,9 @@ func scanStoreApp(row rowScanner) (StoreApp, error) {
 		s.ExpiresAt = &expires.Time
 	}
 	if lastLaunch.Valid {
-		s.LastLaunchAt = &lastLaunch.Time
+		if t, err := parseSQLiteTime(lastLaunch.String); err == nil {
+			s.LastLaunchAt = &t
+		}
 	}
 	if pid.Valid {
 		s.ProjectID = &pid.Int64

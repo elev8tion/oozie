@@ -607,3 +607,23 @@ func TestAutoInstallOnPublish(t *testing.T) {
 		t.Fatal("auto-install off must not install")
 	}
 }
+
+// TestGetStoreAppWithLaunchEvents is the regression test for the scan bug
+// that silently broke installs once an app had beacon pings: MAX(created_at)
+// comes back as text and must still produce a LastLaunchAt.
+func TestGetStoreAppWithLaunchEvents(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t)
+	p, _ := s.CreateProject(ctx, "Pinged", filepath.Join(t.TempDir(), "pg"), true)
+	id, _ := s.repo.UpsertStoreApp(ctx, p.ID, PublishDraft{AppName: "Pinged", Headline: "h", Description: "d"}, "", "pinged")
+	if err := s.repo.RecordAppEvent(ctx, "pinged", "launch"); err != nil {
+		t.Fatal(err)
+	}
+	app, err := s.GetStoreApp(ctx, id)
+	if err != nil {
+		t.Fatalf("GetStoreApp with launch events: %v", err)
+	}
+	if app.LaunchCount != 1 || app.LastLaunchAt == nil {
+		t.Fatalf("liveness not populated: count=%d last=%v", app.LaunchCount, app.LastLaunchAt)
+	}
+}

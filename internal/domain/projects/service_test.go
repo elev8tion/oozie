@@ -76,6 +76,10 @@ func TestPublishLifecycle(t *testing.T) {
 	}
 	s.WaitForJobs()
 
+	if _, err := os.Stat(filepath.Join(workdir, "DESIGN.md")); err != nil {
+		t.Errorf("DESIGN.md was not seeded into the project workdir: %v", err)
+	}
+
 	jobs, err := s.ListJobs(ctx, "")
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("jobs = %v (err %v)", jobs, err)

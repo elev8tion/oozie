@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	_ "embed"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -17,6 +18,12 @@ import (
 	"oozie/internal/agent/pi"
 	"oozie/internal/build"
 )
+
+// designGuide is written into every project workdir as DESIGN.md so the
+// agent (and the user) share one visual/UX standard for the apps built there.
+//
+//go:embed design.md
+var designGuide []byte
 
 type Service struct {
 	repo    *Repo
@@ -280,6 +287,11 @@ func projectWorkdir(p Project) (string, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return "", err
 	}
+	// Seed the design standard once; the user may edit it per-project.
+	guide := filepath.Join(path, "DESIGN.md")
+	if _, err := os.Stat(guide); os.IsNotExist(err) {
+		_ = os.WriteFile(guide, designGuide, 0o644)
+	}
 	return path, nil
 }
 
@@ -303,7 +315,11 @@ Producing Mac apps (oozie's publish pipeline):
 - When the user asks for an app, scaffold a Swift package at the project root: a Package.swift with a single executable target, macOS platform .macOS(.v13) or later, sources under Sources/.
 - For GUI apps, use SwiftUI with an explicit AppDelegate-free entry (@main struct conforming to App) and call NSApplication.shared.setActivationPolicy(.regular) plus NSApp.activate(ignoringOtherApps: true) at launch so the window appears when run from a bundle.
 - Verify with 'swift build' before declaring the work done.
-- Optionally place a 1024x1024 icon.png (or icon.icns) at the project root; oozie converts it into the app icon when publishing.
+- Place a 1024x1024 icon.png (or icon.icns) at the project root; oozie converts it into the app icon when publishing.
+
+Design quality (non-negotiable):
+- The project root contains DESIGN.md — read it before any UI work and follow it. It is the visual/UX standard for every app built here: native macOS feel, HIG-aligned layout on an 8pt grid, semantic system colors with full dark-mode support, system text styles, SF Symbols (never emoji as icons), designed empty/loading/error states, keyboard shortcuts, confirmation for destructive actions, and accessibility labels.
+- "It compiles" is not done. Done means: build passes AND every screen looks intentional in light and dark mode with no default-looking, cramped, or misaligned UI.
 - oozie's Publish action runs 'swift build -c release' and wraps the executable in a .app bundle, so the package MUST build cleanly from the project root with no extra steps. If you instead produce an .xcodeproj, place the final built .app in the project root or dist/.`, p.Name, workdir)
 }
 

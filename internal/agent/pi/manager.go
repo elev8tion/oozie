@@ -67,13 +67,55 @@ type Manager struct {
 }
 
 func NewManager(catalog Catalog, sink Sink) *Manager {
-	binary := os.Getenv("PI_BIN")
-	if binary == "" {
-		binary = "pi"
-	}
-	m := &Manager{procs: map[int64]*proc{}, sink: sink, catalog: catalog, binary: binary, approvalExt: materializeApprovalExtension(), stop: make(chan struct{})}
+	m := &Manager{procs: map[int64]*proc{}, sink: sink, catalog: catalog, binary: resolvePiBinary(), approvalExt: materializeApprovalExtension(), stop: make(chan struct{})}
 	go m.reapLoop()
 	return m
+}
+
+// resolvePiBinary finds the pi executable even when oozie was launched
+// from Finder, where PATH is the bare system default and Homebrew paths
+// are missing.
+func resolvePiBinary() string {
+	if v := os.Getenv("PI_BIN"); v != "" {
+		return v
+	}
+	if p, err := exec.LookPath("pi"); err == nil {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	for _, candidate := range []string{
+		"/opt/homebrew/bin/pi",
+		"/usr/local/bin/pi",
+		filepath.Join(home, ".local", "bin", "pi"),
+		filepath.Join(home, "bin", "pi"),
+		filepath.Join(home, ".npm-global", "bin", "pi"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && info.Mode()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return "pi"
+}
+
+// augmentedPathEnv returns the process environment with the common
+// Homebrew/local bin directories appended to PATH, so pi's own bash tool
+// finds developer tooling under a Finder-launched oozie.
+func augmentedPathEnv() []string {
+	env := os.Environ()
+	extras := []string{"/opt/homebrew/bin", "/usr/local/bin"}
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			path := strings.TrimPrefix(kv, "PATH=")
+			for _, extra := range extras {
+				if !strings.Contains(":"+path+":", ":"+extra+":") {
+					path += ":" + extra
+				}
+			}
+			env[i] = "PATH=" + path
+			return env
+		}
+	}
+	return append(env, "PATH=/usr/bin:/bin:/usr/sbin:/sbin:"+strings.Join(extras, ":"))
 }
 
 // reapLoop stops pi processes that have been idle past idleTimeout.
@@ -244,7 +286,7 @@ func (m *Manager) ensure(opts StartOptions) (*proc, error) {
 
 	cmd := exec.Command(m.binary, args...)
 	cmd.Dir = opts.Workdir
-	cmd.Env = os.Environ()
+	cmd.Env = augmentedPathEnv()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

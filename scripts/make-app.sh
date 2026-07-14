@@ -40,5 +40,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 </plist>
 EOF
 
+# Ad-hoc sign the bundle so Finder/Gatekeeper treat it as intact.
+command -v codesign >/dev/null && codesign --force --deep -s - "$APP"
+
 echo "built $APP"
 echo "install: ditto $APP ~/Applications/oozie.app"

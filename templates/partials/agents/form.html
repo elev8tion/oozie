@@ -10,7 +10,7 @@
         {{range $a.Models}}<option value="{{.Full}}" {{if eq .Full $a.Model}}selected{{end}}>{{.Full}}</option>{{else}}<option value="">pi default</option>{{end}}
       </select>
     </label>
-    <span class="muted">Runs your local pi instance in this project’s directory. Cmd+Enter to send.</span>
+    <span class="muted">Cmd+Enter to send. While the agent is working, sending steers it mid-run — no need to wait or cancel.</span>
     <button class="button primary">Send</button>
   </div>
 </form>

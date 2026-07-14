@@ -82,7 +82,7 @@ func (r *Repo) GetSession(ctx context.Context, projectID int64) (AgentSession, e
 }
 
 func (r *Repo) ListMessages(ctx context.Context, sessionID int64) ([]AgentMessage, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT m.id,m.request_id,m.role,m.status,m.content,m.metadata_json,m.created_at FROM agent_messages m JOIN agent_requests ar ON ar.id=m.request_id WHERE ar.session_id=? ORDER BY m.created_at, m.id`, sessionID)
+	rows, err := r.db.QueryContext(ctx, `SELECT m.id,m.request_id,m.role,m.status,m.content,m.metadata_json,COALESCE(json_extract(m.metadata_json,'$.body'),''),m.created_at FROM agent_messages m JOIN agent_requests ar ON ar.id=m.request_id WHERE ar.session_id=? ORDER BY m.created_at, m.id`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (r *Repo) ListMessages(ctx context.Context, sessionID int64) ([]AgentMessag
 	var out []AgentMessage
 	for rows.Next() {
 		var m AgentMessage
-		if err := rows.Scan(&m.ID, &m.RequestID, &m.Role, &m.Status, &m.Content, &m.MetadataJSON, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.RequestID, &m.Role, &m.Status, &m.Content, &m.MetadataJSON, &m.Body, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -121,6 +121,11 @@ func (r *Repo) CreateAgentRequest(ctx context.Context, sessionID int64, mode, me
 		return 0, err
 	}
 	defer tx.Rollback()
+	// A new request while one streams is a steer: the old request's events
+	// now flow to the new one, so settle the old row.
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_requests SET status='completed', updated_at=CURRENT_TIMESTAMP, completed_at=CURRENT_TIMESTAMP WHERE session_id=? AND status IN ('streaming','waiting')`, sessionID); err != nil {
+		return 0, err
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO agent_requests (session_id,status,mode) VALUES (?,'streaming',?)`, sessionID, mode)
 	if err != nil {
 		return 0, err
@@ -134,6 +139,27 @@ func (r *Repo) CreateAgentRequest(ctx context.Context, sessionID int64, mode, me
 
 func (r *Repo) InsertMessage(ctx context.Context, requestID int64, role, status, content string) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO agent_messages (request_id,role,status,content,metadata_json) VALUES (?,?,?,?,'{}')`, requestID, role, status, content)
+	return err
+}
+
+// InsertToolStart records a tool call in flight; FinalizeTool (matched by
+// callID) replaces it with the outcome and expandable body.
+func (r *Repo) InsertToolStart(ctx context.Context, requestID int64, callID, content string) error {
+	meta, _ := json.Marshal(map[string]string{"callId": callID})
+	_, err := r.db.ExecContext(ctx, `INSERT INTO agent_messages (request_id,role,status,content,metadata_json) VALUES (?,'tool','loading',?,?)`, requestID, content, string(meta))
+	return err
+}
+
+func (r *Repo) FinalizeTool(ctx context.Context, requestID int64, callID, content, body string) error {
+	meta, _ := json.Marshal(map[string]string{"callId": callID, "body": body})
+	res, err := r.db.ExecContext(ctx, `UPDATE agent_messages SET content=?, status='completed', metadata_json=? WHERE request_id=? AND role='tool' AND status='loading' AND json_extract(metadata_json,'$.callId')=?`, content, string(meta), requestID, callID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	_, err = r.db.ExecContext(ctx, `INSERT INTO agent_messages (request_id,role,status,content,metadata_json) VALUES (?,'tool','completed',?,?)`, requestID, content, string(meta))
 	return err
 }
 

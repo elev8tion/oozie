@@ -45,3 +45,9 @@ Interface Guidelines. These rules are mandatory unless the user overrides them.
   project root (flat shape, one or two colors, no text) so publishing embeds it.
 - Before declaring the work done: build it, then walk each screen and fix
   anything misaligned, cramped, default-looking, or unlabeled.
+
+## Visual review loop
+After any build that changes UI, run `sh Tools/visual-review.sh <ExecutableName>`
+to capture the real window to `review.png`, read that image, and critique it
+against this document. Fix what fails and re-review. A build that has never
+been looked at does not ship.

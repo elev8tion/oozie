@@ -59,6 +59,7 @@ type AgentMessage struct {
 	Status       string
 	Content      string
 	MetadataJSON string
+	Body         string // expandable detail: code written or command output
 	CreatedAt    time.Time
 }
 

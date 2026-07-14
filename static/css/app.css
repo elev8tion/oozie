@@ -147,3 +147,11 @@ td.row-actions{flex-wrap:nowrap;justify-content:flex-end;white-space:nowrap;gap:
 /* Streaming assistant message: subtle pulse while text is arriving. */
 @keyframes oozie-pulse{0%,100%{opacity:.45}50%{opacity:1}}
 .message .status.loading,.working{animation:oozie-pulse 1.2s ease-in-out infinite}
+
+/* Rich timeline: expandable code/output bodies on tool messages,
+   preserved whitespace in message text. */
+.message p{white-space:pre-wrap;margin:.35rem 0 0;word-break:break-word}
+.tool-body summary{cursor:pointer;font-size:12px;color:var(--muted);margin-top:.35rem}
+.tool-body summary:hover{color:var(--text)}
+.tool-body pre{max-height:280px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0 0;font-size:11px;line-height:1.5}
+.tool-body code{font-family:ui-monospace,"SF Mono",Menlo,monospace}

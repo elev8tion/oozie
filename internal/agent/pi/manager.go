@@ -29,7 +29,11 @@ type Sink interface {
 	// AssistantPartial delivers the text-so-far of a streaming assistant
 	// message (throttled); the final AssistantMessage supersedes it.
 	AssistantPartial(projectID, requestID int64, content string)
-	ToolMessage(projectID, requestID int64, content string)
+	// ToolStarted announces a tool call beginning; ToolFinished replaces it
+	// (matched by callID) with the outcome and an expandable body — the
+	// file content written or the command output.
+	ToolStarted(projectID, requestID int64, callID, content string)
+	ToolFinished(projectID, requestID int64, callID, content, body string)
 	RequestSettled(projectID, requestID int64, status string)
 	Question(projectID, requestID int64, rpcID, prompt, optionsJSON string)
 	Permission(projectID, requestID int64, rpcID, name, reason string)
@@ -285,6 +289,9 @@ type proc struct {
 	lastPartialFlush time.Time
 	lastPartialLen   int
 	stats            *SessionStats
+	// toolArgs remembers each call's args from tool_execution_start,
+	// because pi's tool_execution_end event doesn't repeat them.
+	toolArgs map[string]map[string]any
 }
 
 func (p *proc) alive() bool {
@@ -372,9 +379,11 @@ type event struct {
 	// extension_ui_request, so it stays raw and is decoded per event type.
 	Message json.RawMessage `json:"message"`
 
-	ToolName string         `json:"toolName"`
-	Args     map[string]any `json:"args"`
-	IsError  bool           `json:"isError"`
+	ToolName   string          `json:"toolName"`
+	ToolCallID string          `json:"toolCallId"`
+	Args       map[string]any  `json:"args"`
+	IsError    bool            `json:"isError"`
+	Result     json.RawMessage `json:"result"`
 
 	// extension_ui_request payloads are decoded separately in
 	// handleUIRequest because their "message" field is a string and
@@ -455,9 +464,30 @@ func (p *proc) handleLine(line string) {
 			}
 		}
 
-	case "tool_execution_end":
+	case "tool_execution_start":
+		p.mu.Lock()
+		if p.toolArgs == nil {
+			p.toolArgs = map[string]map[string]any{}
+		}
+		p.toolArgs[ev.ToolCallID] = ev.Args
+		p.mu.Unlock()
 		if requestID != 0 {
-			p.sink.ToolMessage(p.projectID, requestID, describeTool(ev.ToolName, ev.Args, ev.IsError))
+			p.sink.ToolStarted(p.projectID, requestID, ev.ToolCallID, describeTool(ev.ToolName, ev.Args, "running"))
+		}
+
+	case "tool_execution_end":
+		p.mu.Lock()
+		if args := p.toolArgs[ev.ToolCallID]; args != nil {
+			ev.Args = args
+			delete(p.toolArgs, ev.ToolCallID)
+		}
+		p.mu.Unlock()
+		if requestID != 0 {
+			status := "ok"
+			if ev.IsError {
+				status = "error"
+			}
+			p.sink.ToolFinished(p.projectID, requestID, ev.ToolCallID, describeTool(ev.ToolName, ev.Args, status), toolBody(ev))
 		}
 
 	case "agent_settled":
@@ -605,7 +635,7 @@ func extractText(raw json.RawMessage) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func describeTool(name string, args map[string]any, isError bool) string {
+func describeTool(name string, args map[string]any, status string) string {
 	detail := ""
 	for _, key := range []string{"command", "path", "file_path", "pattern", "url"} {
 		if v, ok := args[key].(string); ok && v != "" {
@@ -616,12 +646,48 @@ func describeTool(name string, args map[string]any, isError bool) string {
 	if len(detail) > 120 {
 		detail = detail[:117] + "…"
 	}
-	status := "ok"
-	if isError {
-		status = "error"
-	}
 	if detail == "" {
 		return fmt.Sprintf("%s (%s)", name, status)
 	}
 	return fmt.Sprintf("%s: %s (%s)", name, detail, status)
+}
+
+const maxToolBody = 6000
+
+// toolBody extracts the interesting payload of a finished tool call: the
+// code written (write/edit) or the tool's output (bash and friends).
+func toolBody(ev event) string {
+	body := ""
+	switch ev.ToolName {
+	case "write":
+		body, _ = ev.Args["content"].(string)
+	case "edit":
+		for _, key := range []string{"newText", "new_text", "new_string", "newStr", "replacement"} {
+			if v, ok := ev.Args[key].(string); ok && v != "" {
+				body = v
+				break
+			}
+		}
+	}
+	if body == "" && len(ev.Result) > 0 {
+		var res struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(ev.Result, &res) == nil {
+			var parts []string
+			for _, c := range res.Content {
+				if c.Type == "text" && strings.TrimSpace(c.Text) != "" {
+					parts = append(parts, c.Text)
+				}
+			}
+			body = strings.TrimSpace(strings.Join(parts, "\n"))
+		}
+	}
+	if len(body) > maxToolBody {
+		body = body[:maxToolBody] + "\n… (truncated)"
+	}
+	return body
 }

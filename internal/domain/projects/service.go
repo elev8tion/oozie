@@ -4,10 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	_ "embed"
+	"embed"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -19,11 +20,12 @@ import (
 	"oozie/internal/build"
 )
 
-// designGuide is written into every project workdir as DESIGN.md so the
-// agent (and the user) share one visual/UX standard for the apps built there.
+// seedsFS is materialized into every project workdir: DESIGN.md (the
+// visual/UX standard) and Tools/ (the visual-review helpers). Files are
+// only written if missing, so per-project edits stick.
 //
-//go:embed design.md
-var designGuide []byte
+//go:embed all:seeds
+var seedsFS embed.FS
 
 type Service struct {
 	repo    *Repo
@@ -246,9 +248,14 @@ func (s *Service) AssistantPartial(projectID, requestID int64, content string) {
 		log.Printf("persist streaming text (project %d): %v", projectID, err)
 	}
 }
-func (s *Service) ToolMessage(projectID, requestID int64, content string) {
-	if err := s.repo.InsertMessage(context.Background(), requestID, "tool", "completed", content); err != nil {
-		log.Printf("persist tool message (project %d): %v", projectID, err)
+func (s *Service) ToolStarted(projectID, requestID int64, callID, content string) {
+	if err := s.repo.InsertToolStart(context.Background(), requestID, callID, content); err != nil {
+		log.Printf("persist tool start (project %d): %v", projectID, err)
+	}
+}
+func (s *Service) ToolFinished(projectID, requestID int64, callID, content, body string) {
+	if err := s.repo.FinalizeTool(context.Background(), requestID, callID, content, body); err != nil {
+		log.Printf("persist tool result (project %d): %v", projectID, err)
 	}
 }
 func (s *Service) RequestSettled(projectID, requestID int64, status string) {
@@ -287,12 +294,36 @@ func projectWorkdir(p Project) (string, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return "", err
 	}
-	// Seed the design standard once; the user may edit it per-project.
-	guide := filepath.Join(path, "DESIGN.md")
-	if _, err := os.Stat(guide); os.IsNotExist(err) {
-		_ = os.WriteFile(guide, designGuide, 0o644)
-	}
+	seedProject(path)
 	return path, nil
+}
+
+// seedProject writes DESIGN.md and Tools/ into the workdir, skipping any
+// file that already exists so per-project edits stick.
+func seedProject(workdir string) {
+	_ = fs.WalkDir(seedsFS, "seeds", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel("seeds", p)
+		dest := filepath.Join(workdir, rel)
+		if _, err := os.Stat(dest); err == nil {
+			return nil
+		}
+		body, err := seedsFS.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return nil
+		}
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(dest, ".sh") {
+			mode = 0o755
+		}
+		_ = os.WriteFile(dest, body, mode)
+		return nil
+	})
 }
 
 func newPiSessionID(projectID int64) string {
@@ -320,6 +351,12 @@ Producing Mac apps (oozie's publish pipeline):
 Design quality (non-negotiable):
 - The project root contains DESIGN.md — read it before any UI work and follow it. It is the visual/UX standard for every app built here: native macOS feel, HIG-aligned layout on an 8pt grid, semantic system colors with full dark-mode support, system text styles, SF Symbols (never emoji as icons), designed empty/loading/error states, keyboard shortcuts, confirmation for destructive actions, and accessibility labels.
 - "It compiles" is not done. Done means: build passes AND every screen looks intentional in light and dark mode with no default-looking, cramped, or misaligned UI.
+
+Visual review (run after any build that changes UI):
+1. Run: sh Tools/visual-review.sh <ExecutableName> — it builds, launches the app, screenshots its window to review.png, and quits it.
+2. Read review.png with your read tool and critique the actual pixels against DESIGN.md: spacing, alignment, hierarchy, empty states, anything default-looking.
+3. Fix what fails, rebuild, and re-run the review. Ship only when the screenshot would pass DESIGN.md.
+If the screenshot comes back black/empty, the user needs to grant Screen Recording permission (System Settings → Privacy & Security) — tell them, and continue without the review rather than looping.
 - oozie's Publish action runs 'swift build -c release' and wraps the executable in a .app bundle, so the package MUST build cleanly from the project root with no extra steps. If you instead produce an .xcodeproj, place the final built .app in the project root or dist/.`, p.Name, workdir)
 }
 
